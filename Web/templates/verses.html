@@ -8,6 +8,8 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <!-- Tajweed CSS -->
+    <link href="{{ url_for('static', filename='css/tajweed-demo.css') }}" rel="stylesheet">
     <style>
         body {
             background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
@@ -29,6 +31,39 @@
             transform: translateY(-8px);
             box-shadow: 0 15px 40px rgba(0,0,0,0.15);
             border-left-color: #43e97b;
+        }
+
+        /* Tajweed Rules Styling */
+        .tajweed-container {
+            background: linear-gradient(145deg, #fff8dc, #f5f5dc);
+            border: 2px solid #daa520;
+            border-radius: 15px;
+            direction: rtl;
+            text-align: right;
+            padding: 20px;
+        }
+        
+        .tajweed-legend {
+            background: rgba(255, 255, 255, 0.95);
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        
+        .tajweed-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .tajweed-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         
         .card {
@@ -269,10 +304,27 @@
                             
                             <!-- Verse Content -->
                             <div class="col">
-                                <!-- Arabic Text -->
-                                <div class="arabic-text p-4 mb-3">
-                                    {{ verse.ayahText }}
+                                <!-- Arabic Text with Tajweed -->
+                                <div class="tajweed-header">
+                                    <h6 class="fw-bold text-primary mb-0">
+                                        <i class="fas fa-book me-2"></i>Teks Arab:
+                                    </h6>
+                                    <div class="tajweed-toggle">
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input tajweed-checkbox" type="checkbox" id="tajweedToggle{{ verse.verseID }}" checked>
+                                            <label class="form-check-label" for="tajweedToggle{{ verse.verseID }}">
+                                                <i class="fas fa-palette me-1"></i>Tajweed
+                                            </label>
+                                        </div>
+                                    </div>
                                 </div>
+                                <div class="tajweed-container mb-3">
+                                    <div class="tajweed-text" id="tajweedText{{ verse.verseID }}" data-original-text="{{ verse.ayahText }}">
+                                        {{ verse.ayahText }}
+                                    </div>
+                                </div>
+                                <!-- Tajweed Legend (hidden initially) -->
+                                <div class="tajweed-legend" id="tajweedLegend{{ verse.verseID }}" style="display:none;"></div>
                                 
                                 <!-- Indonesian Translation -->
                                 <div class="mb-3">
@@ -433,7 +485,60 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Tajweed Detection JavaScript -->
+    <script src="{{ url_for('static', filename='js/tajweed-detector.js') }}"></script>
     <script>
+        // Initialize Tajweed Detector
+        const tajweedDetector = new TajweedDetector({
+            showTooltips: true,
+            tooltipLanguage: 'id',
+            showLegend: true
+        });
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize tajweed for all verses
+            document.querySelectorAll('.tajweed-text').forEach(textElement => {
+                const verseId = textElement.id.replace('tajweedText', '');
+                const originalText = textElement.getAttribute('data-original-text');
+                const toggleCheckbox = document.getElementById(`tajweedToggle${verseId}`);
+                const legendContainer = document.getElementById(`tajweedLegend${verseId}`);
+                
+                // Apply tajweed formatting initially
+                textElement.innerHTML = tajweedDetector.parse(originalText);
+                tajweedDetector._enableTooltips(textElement);
+                
+                // Add toggle functionality
+                toggleCheckbox.addEventListener('change', function() {
+                    if (this.checked) {
+                        textElement.innerHTML = tajweedDetector.parse(originalText);
+                        tajweedDetector._enableTooltips(textElement);
+                        legendContainer.style.display = 'block';
+                    } else {
+                        textElement.textContent = originalText;
+                        legendContainer.style.display = 'none';
+                    }
+                });
+                
+                // Show legend on hover
+                textElement.addEventListener('mouseenter', function() {
+                    if (toggleCheckbox.checked) {
+                        legendContainer.style.display = 'block';
+                        // Create legend if not already created
+                        if (!legendContainer.hasChildNodes()) {
+                            tajweedDetector.createLegend(legendContainer);
+                        }
+                    }
+                });
+                
+                textElement.addEventListener('mouseleave', function() {
+                    // Keep legend visible if user has interacted with it
+                    if (!legendContainer.contains(document.activeElement)) {
+                        legendContainer.style.display = 'none';
+                    }
+                });
+            });
+        });
+
         // Search functionality
         document.getElementById('searchInput').addEventListener('input', function() {
             const searchTerm = this.value.toLowerCase();
@@ -445,7 +550,7 @@
             let visibleCount = 0;
 
             verses.forEach(verse => {
-                const arabicText = verse.querySelector('.arabic-text').textContent.toLowerCase();
+                const arabicText = verse.querySelector('.tajweed-text').getAttribute('data-original-text').toLowerCase();
                 const translation = verse.querySelector('p').textContent.toLowerCase();
                 const transliteration = verse.querySelector('.font-monospace')?.textContent.toLowerCase() || '';
                 
@@ -560,48 +665,4 @@
                             <strong>Hasil Deteksi:</strong><br>
                             <div class="mt-2">
                                 <small class="d-block"><strong>Diharapkan:</strong> Ayat ${expectedVerse}</small>
-                                <small class="d-block"><strong>Terdeteksi:</strong> Ayat ${detectedVerse}</small>
-                                <small class="d-block"><strong>Confidence:</strong> ${confidence}%</small>
-                                <div class="mt-2">
-                                    ${isCorrect ? '<i class="fas fa-check text-success me-1"></i>Deteksi benar!' : '<i class="fas fa-times text-warning me-1"></i>Ayat berbeda terdeteksi'}
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                } else {
-                    resultDiv.innerHTML = '<div class="alert alert-danger border-0 rounded-3"><i class="fas fa-times-circle me-2"></i>Gagal mendeteksi ayat</div>';
-                }
-            })
-            .catch(error => {
-                resultDiv.innerHTML = '<div class="alert alert-danger border-0 rounded-3"><i class="fas fa-times-circle me-2"></i>Error: ' + error.message + '</div>';
-            });
-        }
-
-        // Add verse hover effects
-        document.querySelectorAll('.verse-card').forEach(card => {
-            card.addEventListener('mouseenter', function() {
-                this.style.borderLeftColor = '#43e97b';
-            });
-            
-            card.addEventListener('mouseleave', function() {
-                this.style.borderLeftColor = '#667eea';
-            });
-        });
-
-        // Smooth scroll for navigation
-        document.addEventListener('DOMContentLoaded', function() {
-            // Add fade-in animation to cards
-            const cards = document.querySelectorAll('.verse-card');
-            cards.forEach((card, index) => {
-                card.style.opacity = '0';
-                card.style.transform = 'translateY(20px)';
-                setTimeout(() => {
-                    card.style.transition = 'all 0.5s ease';
-                    card.style.opacity = '1';
-                    card.style.transform = 'translateY(0)';
-                }, index * 100);
-            });
-        });
-    </script>
-</body>
-</html>
+                                <small class="d-block"><strong>Ter

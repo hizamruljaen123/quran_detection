@@ -7,6 +7,8 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Tajweed CSS Library -->
+    <link href="https://cdn.jsdelivr.net/npm/quran-tajweed@1.0.0/dist/tajweed.min.css" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <style>
         body {
@@ -47,6 +49,66 @@
             color: #2c3e50;
             background: linear-gradient(145deg, #fff8dc, #f5f5dc);
             border: 2px solid #daa520;
+        }
+        
+        /* Tajweed Rules Styling */
+        .tajweed-container {
+            position: relative;
+        }
+        
+        .tajweed-legend {
+            background: rgba(255, 255, 255, 0.95);
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        
+        .tajweed-legend h6 {
+            margin-bottom: 15px;
+            color: #2c3e50;
+            font-weight: bold;
+        }
+        
+        .tajweed-rule {
+            display: inline-block;
+            padding: 5px 10px;
+            margin: 3px;
+            border-radius: 15px;
+            font-size: 0.85rem;
+            color: white;
+            font-weight: 500;
+        }
+        
+        /* Tajweed Color Rules */
+        .ghunnah { background-color: #ff6b6b; color: white !important; }
+        .qalqalah { background-color: #4ecdc4; color: white !important; }
+        .ikhfa { background-color: #45b7d1; color: white !important; }
+        .idgham { background-color: #96ceb4; color: white !important; }
+        .iqlab { background-color: #feca57; color: white !important; }
+        .madd { background-color: #ff9ff3; color: white !important; }
+        .lam-shamsiyyah { background-color: #54a0ff; color: white !important; }
+        .lam-qamariyyah { background-color: #5f27cd; color: white !important; }
+        .ra-tafkhim { background-color: #ff6348; color: white !important; }
+        .ra-tarqiq { background-color: #2ed573; color: white !important; }
+        .waqf { background-color: #a4b0be; color: white !important; }
+        
+        .arabic-text-tajweed {
+            font-family: 'Amiri', 'Traditional Arabic', serif;
+            font-size: 2.2rem;
+            line-height: 3;
+            text-align: right;
+            direction: rtl;
+            color: #2c3e50;
+            background: linear-gradient(145deg, #fff8dc, #f5f5dc);
+            border: 2px solid #daa520;
+            padding: 25px;
+            border-radius: 15px;
+        }
+        
+        .tajweed-toggle {
+            margin-bottom: 15px;
         }
         
         .verse-info {
@@ -219,8 +281,38 @@
                             <h6 class="text-muted fw-bold">
                                 <i class="fas fa-language me-2"></i>Teks Arab:
                             </h6>
-                            <div class="arabic-text p-4 rounded">
-                                {{ verse_info.ayahText }}
+                            
+                            <!-- Tajweed Toggle -->
+                            <div class="tajweed-toggle">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="tajweedToggle" checked>
+                                    <label class="form-check-label fw-bold text-primary" for="tajweedToggle">
+                                        <i class="fas fa-palette me-2"></i>Tampilkan Kaidah Tajweed
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <!-- Tajweed Legend -->
+                            <div class="tajweed-legend" id="tajweedLegend">
+                                <h6><i class="fas fa-info-circle me-2"></i>Keterangan Warna Tajweed:</h6>
+                                <div class="d-flex flex-wrap">
+                                    <span class="tajweed-rule ghunnah">Ghunnah</span>
+                                    <span class="tajweed-rule qalqalah">Qalqalah</span>
+                                    <span class="tajweed-rule ikhfa">Ikhfa</span>
+                                    <span class="tajweed-rule idgham">Idgham</span>
+                                    <span class="tajweed-rule iqlab">Iqlab</span>
+                                    <span class="tajweed-rule madd">Madd</span>
+                                    <span class="tajweed-rule lam-shamsiyyah">Lam Shamsiyyah</span>
+                                    <span class="tajweed-rule lam-qamariyyah">Lam Qamariyyah</span>
+                                    <span class="tajweed-rule ra-tafkhim">Ra Tafkhim</span>
+                                    <span class="tajweed-rule ra-tarqiq">Ra Tarqiq</span>
+                                    <span class="tajweed-rule waqf">Waqf</span>
+                                </div>
+                            </div>
+                            
+                            <div class="arabic-text-tajweed tajweed-container" id="arabicTextContainer">
+                                <div id="originalText" style="display: none;">{{ verse_info.ayahText }}</div>
+                                <div id="tajweedText">{{ verse_info.ayahText }}</div>
                             </div>
                         </div>
                         
@@ -415,6 +507,191 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Tajweed Detection JavaScript -->
+    <script>
+        // Tajweed Rules Detection Engine
+        class TajweedDetector {
+            constructor() {
+                this.rules = {
+                    // Ghunnah - Nun or Meem with shadda
+                    ghunnah: /[نم]ّ/g,
+                    
+                    // Qalqalah letters
+                    qalqalah: /[قطبجد](?=\s|$|[^\u064B-\u065F])/g,
+                    
+                    // Ikhfa - Nun sakinah before specific letters
+                    ikhfa: /ن(?=[\u064B-\u065F]*[تثجدذزسشصضطظفقك])/g,
+                    
+                    // Idgham - Nun sakinah before Yaa, Raa, Laam, Waw, Meem, Nun
+                    idgham: /ن(?=[\u064B-\u065F]*[يرلومن])/g,
+                    
+                    // Iqlab - Nun sakinah before Baa
+                    iqlab: /ن(?=[\u064B-\u065F]*ب)/g,
+                    
+                    // Madd - elongation marks
+                    madd: /[اويى](?=[\u064B-\u065F]*[اويى])|[اويى]ّ/g,
+                    
+                    // Lam Shamsiyyah
+                    lamShamsiyyah: /ال(?=[تثدذرزسشصضطظلن])/g,
+                    
+                    // Lam Qamariyyah
+                    lamQamariyyah: /ال(?=[ابجحخعغفقكمهويى])/g,
+                    
+                    // Ra Tafkhim (thick R)
+                    raTafkhim: /ر(?=[\u064E\u064F])|(?:[\u064E\u064F])ر/g,
+                    
+                    // Ra Tarqiq (thin R)
+                    raTarqiq: /ر(?=[\u0650])|(?:[\u0650])ر/g,
+                    
+                    // Waqf marks
+                    waqf: /[۝۞ۣ۟۠ۡۢۤۥۦۧۨ۩۪۫۬]/g
+                };
+                
+                this.isEnabled = true;
+            }
+            
+            applyTajweed(text) {
+                if (!this.isEnabled) return text;
+                
+                let processedText = text;
+                
+                // Apply each rule
+                Object.entries(this.rules).forEach(([ruleName, pattern]) => {
+                    const className = this.getClassName(ruleName);
+                    processedText = processedText.replace(pattern, (match) => {
+                        return `<span class="${className}" title="${this.getRuleDescription(ruleName)}">${match}</span>`;
+                    });
+                });
+                
+                return processedText;
+            }
+            
+            getClassName(ruleName) {
+                const classMap = {
+                    ghunnah: 'ghunnah',
+                    qalqalah: 'qalqalah',
+                    ikhfa: 'ikhfa',
+                    idgham: 'idgham',
+                    iqlab: 'iqlab',
+                    madd: 'madd',
+                    lamShamsiyyah: 'lam-shamsiyyah',
+                    lamQamariyyah: 'lam-qamariyyah',
+                    raTafkhim: 'ra-tafkhim',
+                    raTarqiq: 'ra-tarqiq',
+                    waqf: 'waqf'
+                };
+                return classMap[ruleName] || '';
+            }
+            
+            getRuleDescription(ruleName) {
+                const descriptions = {
+                    ghunnah: 'Ghunnah - Bunyi dengung pada Nun atau Meem bertashdid',
+                    qalqalah: 'Qalqalah - Memantul pada huruf قطبجد',
+                    ikhfa: 'Ikhfa - Menyamarkan bunyi Nun sukun',
+                    idgham: 'Idgham - Memasukkan Nun sukun ke huruf berikutnya',
+                    iqlab: 'Iqlab - Mengubah Nun sukun menjadi Meem',
+                    madd: 'Madd - Memanjangkan bacaan',
+                    lamShamsiyyah: 'Lam Shamsiyyah - Lam yang tidak dibaca',
+                    lamQamariyyah: 'Lam Qamariyyah - Lam yang dibaca jelas',
+                    raTafkhim: 'Ra Tafkhim - Ra tebal/berat',
+                    raTarqiq: 'Ra Tarqiq - Ra tipis/ringan',
+                    waqf: 'Tanda Waqf - Tanda berhenti'
+                };
+                return descriptions[ruleName] || '';
+            }
+            
+            toggle() {
+                this.isEnabled = !this.isEnabled;
+                return this.isEnabled;
+            }
+        }
+        
+        // Initialize Tajweed Detector
+        const tajweedDetector = new TajweedDetector();
+        
+        // Apply Tajweed on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            const originalTextElement = document.getElementById('originalText');
+            const tajweedTextElement = document.getElementById('tajweedText');
+            const toggleElement = document.getElementById('tajweedToggle');
+            const legendElement = document.getElementById('tajweedLegend');
+            
+            if (originalTextElement && tajweedTextElement) {
+                const originalText = originalTextElement.textContent;
+                
+                // Apply initial tajweed
+                const tajweedText = tajweedDetector.applyTajweed(originalText);
+                tajweedTextElement.innerHTML = tajweedText;
+                
+                // Toggle functionality
+                if (toggleElement) {
+                    toggleElement.addEventListener('change', function() {
+                        const isEnabled = this.checked;
+                        
+                        if (isEnabled) {
+                            const tajweedText = tajweedDetector.applyTajweed(originalText);
+                            tajweedTextElement.innerHTML = tajweedText;
+                            legendElement.style.display = 'block';
+                        } else {
+                            tajweedTextElement.innerHTML = originalText;
+                            legendElement.style.display = 'none';
+                        }
+                        
+                        // Update detector state
+                        tajweedDetector.isEnabled = isEnabled;
+                    });
+                }
+            }
+            
+            // Add tooltip functionality
+            document.addEventListener('mouseover', function(e) {
+                if (e.target.classList.contains('ghunnah') || 
+                    e.target.classList.contains('qalqalah') || 
+                    e.target.classList.contains('ikhfa') ||
+                    e.target.classList.contains('idgham') ||
+                    e.target.classList.contains('iqlab') ||
+                    e.target.classList.contains('madd') ||
+                    e.target.classList.contains('lam-shamsiyyah') ||
+                    e.target.classList.contains('lam-qamariyyah') ||
+                    e.target.classList.contains('ra-tafkhim') ||
+                    e.target.classList.contains('ra-tarqiq') ||
+                    e.target.classList.contains('waqf')) {
+                    
+                    // Create tooltip
+                    const tooltip = document.createElement('div');
+                    tooltip.className = 'tajweed-tooltip';
+                    tooltip.innerHTML = e.target.getAttribute('title');
+                    tooltip.style.cssText = `
+                        position: absolute;
+                        background: rgba(0,0,0,0.9);
+                        color: white;
+                        padding: 8px 12px;
+                        border-radius: 6px;
+                        font-size: 0.85rem;
+                        z-index: 1000;
+                        pointer-events: none;
+                        white-space: nowrap;
+                        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+                    `;
+                    
+                    document.body.appendChild(tooltip);
+                    
+                    // Position tooltip
+                    const rect = e.target.getBoundingClientRect();
+                    tooltip.style.left = rect.left + (rect.width / 2) - (tooltip.offsetWidth / 2) + 'px';
+                    tooltip.style.top = rect.top - tooltip.offsetHeight - 10 + 'px';
+                    
+                    e.target.addEventListener('mouseleave', function() {
+                        if (tooltip.parentNode) {
+                            tooltip.parentNode.removeChild(tooltip);
+                        }
+                    }, { once: true });
+                }
+            });
+        });
+    </script>
+    
     <script>
         // Add some interactivity
         document.addEventListener('DOMContentLoaded', function() {
