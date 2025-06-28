@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hasil Deteksi - Deteksi Ayat Al-Quran</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+            font-family: 'Poppins', sans-serif;
+        }
+        
+        .result-card {
+            border: none;
+            border-radius: 20px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+            border-left: 5px solid #28a745;
+            background: linear-gradient(145deg, #ffffff, #f8f9fa);
+        }
+        
+        .confidence-bar {
+            height: 25px;
+            border-radius: 15px;
+            background: linear-gradient(90deg, #dc3545 0%, #ffc107 50%, #28a745 100%);
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .confidence-indicator {
+            height: 100%;
+            border-radius: 15px;
+            background: white;
+            position: relative;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        
+        .arabic-text {
+            font-family: 'Amiri', 'Traditional Arabic', serif;
+            font-size: 2rem;
+            line-height: 2.8;
+            text-align: right;
+            direction: rtl;
+            color: #2c3e50;
+            background: linear-gradient(145deg, #fff8dc, #f5f5dc);
+            border: 2px solid #daa520;
+        }
+        
+        .verse-info {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+        }
+        
+        .audio-player {
+            width: 100%;
+            margin: 15px 0;
+            border-radius: 10px;
+        }
+        
+        .card {
+            border: none;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
+        
+        .card-header {
+            border: none;
+            padding: 1.5rem;
+        }
+        
+        .success-icon {
+            font-size: 3rem;
+            color: #28a745;
+            margin-bottom: 1rem;
+        }
+        
+        .confidence-circle {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto;
+            background: linear-gradient(45deg, #28a745, #20c997);
+            color: white;
+            font-size: 1.5rem;
+            font-weight: bold;
+            box-shadow: 0 8px 25px rgba(40, 167, 69, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark fixed-top" style="background: rgba(102, 126, 234, 0.95); backdrop-filter: blur(10px);">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="{{ url_for('index') }}">
+                <i class="fas fa-mosque me-2"></i>
+                Deteksi Ayat Al-Quran
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link fw-semibold" href="{{ url_for('index') }}">
+                            <i class="fas fa-home me-1"></i>Beranda
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link fw-semibold" href="{{ url_for('upload_audio') }}">
+                            <i class="fas fa-upload me-1"></i>Upload Audio
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link fw-semibold" href="{{ url_for('dataset_info') }}">
+                            <i class="fas fa-database me-1"></i>Dataset
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link fw-semibold" href="{{ url_for('training_page') }}">
+                            <i class="fas fa-brain me-1"></i>Pelatihan
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link fw-semibold" href="{{ url_for('model_info') }}">
+                            <i class="fas fa-cog me-1"></i>Info Model
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link fw-semibold" href="{{ url_for('verses_list') }}">
+                            <i class="fas fa-book-open me-1"></i>Ayat Al-Quran
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container" style="margin-top: 100px;">
+        <!-- Result Header -->
+        <div class="row">
+            <div class="col-12">
+                <div class="card result-card">
+                    <div class="card-body text-center py-5">
+                        <div class="success-icon">
+                            <i class="fas fa-check-circle"></i>
+                        </div>
+                        <h2 class="text-success fw-bold mb-3">Deteksi Berhasil!</h2>
+                        <p class="lead text-muted">AI telah berhasil menganalisis file audio Anda</p>
+                        <div class="mt-3" style="font-family: 'Amiri', serif; font-size: 1.2rem; color: #2c3e50;">
+                            بِسْمِ اللَّهِ الرَّحْمَنِ الرَّحِيمِ
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Results -->
+        <div class="row mt-4">
+            <div class="col-lg-8">
+                <!-- Detected Verse -->
+                <div class="card verse-info mb-4">
+                    <div class="card-body">
+                        <div class="row align-items-center">
+                            <div class="col-md-8">
+                                <h3 class="mb-2 fw-bold">
+                                    <i class="fas fa-bullseye me-2"></i>Ayat Terdeteksi
+                                </h3>
+                                <h4 class="fw-bold">{{ result.verse_name }}</h4>
+                                <p class="mb-0 opacity-75">Surah An-Naba, Ayat {{ result.verse_number }}</p>
+                            </div>
+                            <div class="col-md-4 text-end">
+                                <div class="display-1 fw-bold opacity-75">{{ result.verse_number }}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Audio Player -->
+                {% if uploaded_file %}
+                <div class="card mb-4">
+                    <div class="card-header" style="background: linear-gradient(135deg, #17a2b8, #138496); color: white;">
+                        <h5 class="mb-0 fw-bold">
+                            <i class="fas fa-volume-up me-2"></i>Audio yang Diunggah
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <audio class="audio-player" controls>
+                            <source src="{{ url_for('static', filename='uploads/' + uploaded_file) }}" type="audio/mpeg">
+                            Browser Anda tidak mendukung pemutar audio.
+                        </audio>
+                        <small class="text-muted">
+                            <i class="fas fa-file-audio me-1"></i>
+                            File: {{ uploaded_file }}
+                        </small>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Verse Content -->
+                {% if verse_info %}
+                <div class="card mb-4">
+                    <div class="card-header" style="background: linear-gradient(135deg, #28a745, #20c997); color: white;">
+                        <h5 class="mb-0 fw-bold">
+                            <i class="fas fa-book-open me-2"></i>Isi Ayat Al-Quran
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- Arabic Text -->
+                        <div class="mb-4">
+                            <h6 class="text-muted fw-bold">
+                                <i class="fas fa-language me-2"></i>Teks Arab:
+                            </h6>
+                            <div class="arabic-text p-4 rounded">
+                                {{ verse_info.ayahText }}
+                            </div>
+                        </div>
+                        
+                        <!-- Indonesian Translation -->
+                        <div class="mb-4">
+                            <h6 class="text-muted fw-bold">
+                                <i class="fas fa-globe me-2"></i>Terjemahan Indonesia:
+                            </h6>
+                            <div class="bg-light p-4 rounded border-start border-4 border-primary">
+                                <em class="fs-6">"{{ verse_info.indoText }}"</em>
+                            </div>
+                        </div>
+                        
+                        <!-- Transliteration -->
+                        {% if verse_info.readText %}
+                        <div>
+                            <h6 class="text-muted fw-bold">
+                                <i class="fas fa-spell-check me-2"></i>Transliterasi:
+                            </h6>
+                            <div class="bg-light p-4 rounded border-start border-4 border-warning">
+                                <strong class="text-dark">{{ verse_info.readText }}</strong>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Sidebar with Analytics -->
+            <div class="col-lg-4">
+                <!-- Confidence Score -->
+                <div class="card mb-4">
+                    <div class="card-header" style="background: linear-gradient(135deg, #28a745, #20c997); color: white;">
+                        <h6 class="mb-0 fw-bold">
+                            <i class="fas fa-chart-line me-2"></i>Tingkat Kepercayaan AI
+                        </h6>
+                    </div>
+                    <div class="card-body text-center">
+                        <div class="confidence-circle mb-4">
+                            <span class="display-4">{{ "%.1f"|format(result.confidence * 100) }}%</span>
+                        </div>
+                        
+                        <div class="confidence-bar mb-3">
+                            <div class="confidence-indicator" style="width: {{ (100 - (result.confidence * 100))|round(1) }}%"></div>
+                        </div>
+                        
+                        <div class="row text-center mb-3">
+                            <div class="col-4">
+                                <small class="text-danger fw-bold">Rendah</small>
+                            </div>
+                            <div class="col-4">
+                                <small class="text-warning fw-bold">Sedang</small>
+                            </div>
+                            <div class="col-4">
+                                <small class="text-success fw-bold">Tinggi</small>
+                            </div>
+                        </div>
+                        
+                        {% if result.confidence >= 0.8 %}
+                        <div class="alert alert-success border-0" style="background: linear-gradient(145deg, #d4edda, #c3e6cb);">
+                            <i class="fas fa-check-circle me-2"></i>
+                            <strong>Sangat Yakin</strong><br>
+                            <small>AI sangat percaya dengan hasil ini</small>
+                        </div>
+                        {% elif result.confidence >= 0.6 %}
+                        <div class="alert alert-warning border-0" style="background: linear-gradient(145deg, #fff3cd, #ffeaa7);">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            <strong>Cukup Yakin</strong><br>
+                            <small>AI cukup percaya dengan hasil ini</small>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-danger border-0" style="background: linear-gradient(145deg, #f8d7da, #f5c6cb);">
+                            <i class="fas fa-times-circle me-2"></i>
+                            <strong>Kurang Yakin</strong><br>
+                            <small>AI kurang percaya dengan hasil ini</small>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Top Predictions -->
+                {% if result.top_predictions %}
+                <div class="card mb-4">
+                    <div class="card-header" style="background: linear-gradient(135deg, #6f42c1, #6610f2); color: white;">
+                        <h6 class="mb-0 fw-bold">
+                            <i class="fas fa-trophy me-2"></i>3 Prediksi Teratas
+                        </h6>
+                    </div>
+                    <div class="card-body p-0">
+                        {% for i, (pred_verse, pred_conf) in enumerate(result.top_predictions[:3]) %}
+                        <div class="d-flex justify-content-between align-items-center p-3 {{ 'bg-light' if i == 0 else '' }}">
+                            <div>
+                                <strong class="text-dark">{{ pred_verse }}</strong>
+                                {% if i == 0 %}
+                                    <i class="fas fa-crown text-warning ms-2"></i>
+                                {% elif i == 1 %}
+                                    <i class="fas fa-medal text-secondary ms-2"></i>
+                                {% else %}
+                                    <i class="fas fa-award text-warning ms-2"></i>
+                                {% endif %}
+                            </div>
+                            <div>
+                                <span class="badge {{ 'bg-success' if i == 0 else 'bg-primary' if i == 1 else 'bg-secondary' }} px-3 py-2">
+                                    {{ "%.1f"|format(pred_conf * 100) }}%
+                                </span>
+                            </div>
+                        </div>
+                        {% if i < 2 %}<hr class="my-0">{% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Processing Info -->
+                <div class="card">
+                    <div class="card-header" style="background: linear-gradient(135deg, #6c757d, #495057); color: white;">
+                        <h6 class="mb-0 fw-bold">
+                            <i class="fas fa-info-circle me-2"></i>Detail Pemrosesan
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-12">
+                                <div class="d-flex justify-content-between align-items-center p-2 bg-light rounded">
+                                    <span class="fw-semibold">
+                                        <i class="fas fa-clock text-primary me-2"></i>Waktu Proses:
+                                    </span>
+                                    <span class="text-success fw-bold">{{ result.processing_time if result.processing_time else 'N/A' }}</span>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div class="d-flex justify-content-between align-items-center p-2 bg-light rounded">
+                                    <span class="fw-semibold">
+                                        <i class="fas fa-brain text-purple me-2"></i>Model AI:
+                                    </span>
+                                    <span class="text-info fw-bold">{{ result.model_name if result.model_name else 'Model AI Default' }}</span>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div class="d-flex justify-content-between align-items-center p-2 bg-light rounded">
+                                    <span class="fw-semibold">
+                                        <i class="fas fa-stopwatch text-warning me-2"></i>Durasi Audio:
+                                    </span>
+                                    <span class="text-warning fw-bold">{{ result.audio_duration if result.audio_duration else 'N/A' }}</span>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div class="d-flex justify-content-between align-items-center p-2 bg-light rounded">
+                                    <span class="fw-semibold">
+                                        <i class="fas fa-wave-square text-success me-2"></i>Fitur Audio:
+                                    </span>
+                                    <span class="text-success fw-bold">{{ result.features_count if result.features_count else 'Fitur Audio Lanjutan' }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="row mt-5">
+            <div class="col-12">
+                <div class="card" style="background: linear-gradient(145deg, #f8f9fa, #e9ecef); border: 2px solid #dee2e6;">
+                    <div class="card-body text-center py-4">
+                        <h5 class="fw-bold mb-4 text-dark">
+                            <i class="fas fa-hand-point-right me-2"></i>
+                            Langkah Selanjutnya
+                        </h5>
+                        <div class="d-flex flex-wrap justify-content-center gap-3">
+                            <a href="{{ url_for('upload_audio') }}" class="btn btn-primary btn-lg px-4 py-3">
+                                <i class="fas fa-upload me-2"></i>Upload Audio Lain
+                            </a>
+                            <a href="{{ url_for('verse_detail', verse_id=result.verse_number) }}" class="btn btn-info btn-lg px-4 py-3">
+                                <i class="fas fa-eye me-2"></i>Detail Ayat
+                            </a>
+                            <a href="{{ url_for('verses_list') }}" class="btn btn-success btn-lg px-4 py-3">
+                                <i class="fas fa-list me-2"></i>Semua Ayat
+                            </a>
+                        </div>
+                        <div class="mt-4">
+                            <small class="text-muted">
+                                <i class="fas fa-heart text-danger me-1"></i>
+                                Terima kasih telah menggunakan sistem deteksi ayat Al-Quran
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Add some interactivity
+        document.addEventListener('DOMContentLoaded', function() {
+            // Animate confidence score
+            const confidenceElement = document.querySelector('.display-4');
+            if (confidenceElement) {
+                const finalValue = parseFloat(confidenceElement.textContent);
+                let currentValue = 0;
+                const increment = finalValue / 50;
+                
+                const animation = setInterval(() => {
+                    currentValue += increment;
+                    if (currentValue >= finalValue) {
+                        currentValue = finalValue;
+                        clearInterval(animation);
+                    }
+                    confidenceElement.textContent = currentValue.toFixed(1) + '%';
+                }, 20);
+            }
+            
+            // Add floating animation to cards
+            const cards = document.querySelectorAll('.card');
+            cards.forEach((card, index) => {
+                card.style.animationDelay = `${index * 0.1}s`;
+                card.classList.add('animate__animated', 'animate__fadeInUp');
+            });
+        });
+        
+        // Add CSS animations
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes fadeInUp {
+                from {
+                    opacity: 0;
+                    transform: translateY(30px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+            
+            .animate__animated {
+                animation-duration: 0.6s;
+                animation-fill-mode: both;
+            }
+            
+            .animate__fadeInUp {
+                animation-name: fadeInUp;
+            }
+            
+            .card:hover {
+                transform: translateY(-5px);
+                box-shadow: 0 15px 40px rgba(0,0,0,0.15);
+                transition: all 0.3s ease;
+            }
+            
+            .btn:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+                transition: all 0.3s ease;
+            }
+        `;
+        document.head.appendChild(style);
+    </script>
+</body>
+</html>
