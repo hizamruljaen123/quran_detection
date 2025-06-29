@@ -11,6 +11,12 @@ import pickle
 import numpy as np
 import librosa
 import tensorflow as tf
+import gc
+import psutil
+import traceback
+import sys
+import threading
+import time
 from sklearn.preprocessing import LabelEncoder, RobustScaler
 import mysql.connector
 from mysql.connector import Error
@@ -18,8 +24,6 @@ import scipy.signal
 from datetime import datetime
 import shutil
 from werkzeug.utils import secure_filename
-import threading
-import time
 
 app = Flask(__name__)
 
@@ -54,6 +58,157 @@ loaded_model = None
 loaded_encoder = None
 model_metadata = None
 training_status = {"status": "idle", "progress": 0, "message": ""}
+
+# Error tracking
+app_errors = []
+prediction_count = 0
+last_cleanup_time = time.time()
+
+def log_app_error(error_msg, error_type="GENERAL"):
+    """Log errors without crashing the app"""
+    global app_errors
+    try:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        error_entry = {
+            'timestamp': timestamp,
+            'type': error_type,
+            'message': str(error_msg),
+            'prediction_count': prediction_count
+        }
+        app_errors.append(error_entry)
+        
+        # Keep only last 50 errors to prevent memory buildup
+        if len(app_errors) > 50:
+            app_errors = app_errors[-50:]
+        
+        print(f"🚨 [{timestamp}] {error_type}: {error_msg}")
+        
+    except Exception as e:
+        print(f"❌ Error logging failed: {e}")
+
+def safe_memory_cleanup():
+    """Safely clean up memory without crashing"""
+    try:
+        print("🧹 Starting safe memory cleanup...")
+        
+        # Clear TensorFlow session
+        tf.keras.backend.clear_session()
+        
+        # Force garbage collection
+        collected = gc.collect()
+        
+        # Log memory usage
+        try:
+            process = psutil.Process()
+            memory_mb = process.memory_info().rss / 1024 / 1024
+            print(f"🧠 Memory after cleanup: {memory_mb:.1f} MB, collected {collected} objects")
+        except:
+            print("✅ Cleanup completed (memory info unavailable)")
+        
+        return True
+        
+    except Exception as e:
+        log_app_error(f"Memory cleanup failed: {e}", "CLEANUP_ERROR")
+        return False
+
+def emergency_recovery():
+    """Emergency recovery function to prevent app death"""
+    try:
+        print("🚨 EMERGENCY RECOVERY INITIATED")
+        
+        # Multiple cleanup attempts
+        for i in range(3):
+            try:
+                tf.keras.backend.clear_session()
+                gc.collect()
+                print(f"   Recovery attempt {i+1}: OK")
+                break
+            except Exception as e:
+                print(f"   Recovery attempt {i+1}: Failed - {e}")
+                time.sleep(0.1)
+        
+        # Log current state
+        try:
+            process = psutil.Process()
+            memory_mb = process.memory_info().rss / 1024 / 1024
+            print(f"🧠 Post-recovery memory: {memory_mb:.1f} MB")
+        except:
+            pass
+        
+        print("✅ Emergency recovery completed")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Emergency recovery failed: {e}")
+        return False
+
+def safe_prediction_wrapper(prediction_func):
+    """Wrapper to safely execute predictions without crashing Flask"""
+    def wrapper(*args, **kwargs):
+        global prediction_count, last_cleanup_time
+        prediction_count += 1
+        
+        try:
+            print(f"🔮 Starting prediction #{prediction_count}")
+            
+            # Log memory before
+            try:
+                process = psutil.Process()
+                memory_before = process.memory_info().rss / 1024 / 1024
+                print(f"🧠 Memory before: {memory_before:.1f} MB")
+            except:
+                memory_before = 0
+            
+            # Execute prediction with timeout protection
+            try:
+                result = prediction_func(*args, **kwargs)
+                print(f"✅ Prediction #{prediction_count} completed successfully")
+                return result
+                
+            except Exception as pred_error:
+                log_app_error(f"Prediction function error: {pred_error}", "PREDICTION_ERROR")
+                traceback.print_exc()
+                
+                # Return safe error response instead of crashing
+                return {
+                    'error': 'Prediction failed',
+                    'details': str(pred_error),
+                    'prediction_id': prediction_count,
+                    'recovery_status': 'attempted'
+                }
+            
+        except Exception as wrapper_error:
+            log_app_error(f"Wrapper error: {wrapper_error}", "WRAPPER_ERROR")
+            
+            # Emergency recovery
+            emergency_recovery()
+            
+            return {
+                'error': 'Critical prediction error',
+                'details': str(wrapper_error),
+                'prediction_id': prediction_count,
+                'recovery_status': 'emergency'
+            }
+            
+        finally:
+            # ALWAYS clean up, no matter what
+            try:
+                # Periodic deep cleanup
+                current_time = time.time()
+                if current_time - last_cleanup_time > 30:  # Every 30 seconds
+                    safe_memory_cleanup()
+                    last_cleanup_time = current_time
+                else:
+                    # Quick cleanup
+                    tf.keras.backend.clear_session()
+                    gc.collect()
+                
+                print(f"🧹 Cleanup completed for prediction #{prediction_count}")
+                
+            except Exception as cleanup_error:
+                log_app_error(f"Cleanup error: {cleanup_error}", "CLEANUP_ERROR")
+    
+    return wrapper
 
 class DatabaseManager:
     """Manager untuk koneksi database MySQL"""
@@ -322,73 +477,78 @@ def get_verse_name(verse_number):
     else:
         return f"Unknown ({verse_number})"
 
+@safe_prediction_wrapper
+@safe_prediction_wrapper
 def predict_verse(audio_file_path):
-    """Predict verse dari audio file"""
+    """Predict verse dari audio file dengan error handling yang aman"""
     global loaded_model, loaded_encoder
     
     print(f"🔮 Starting prediction for: {audio_file_path}")
     
-    if not loaded_model:
-        print("❌ Model not loaded")
-        return None
-    
-    if not loaded_encoder:
-        print("❌ Label encoder not loaded")
-        return None
-    
     try:
-        # Extract features
-        print("🎵 Extracting features...")
-        features = extract_advanced_features(audio_file_path)
-        if features is None:
-            print("❌ Feature extraction failed")
-            return None
+        if not loaded_model:
+            raise Exception("Model not loaded")
         
-        print(f"✅ Features extracted with shape: {features.shape}")
+        if not loaded_encoder:
+            raise Exception("Label encoder not loaded")
+        
+        # Check if file exists
+        if not os.path.exists(audio_file_path):
+            raise Exception(f"Audio file not found: {audio_file_path}")
+        
+        # Extract features with error handling
+        try:
+            print("🎵 Extracting features...")
+            features = extract_advanced_features(audio_file_path)
+            if features is None:
+                raise Exception("Feature extraction returned None")
+            
+            print(f"✅ Features extracted with shape: {features.shape}")
+            
+        except Exception as feature_error:
+            raise Exception(f"Feature extraction failed: {feature_error}")
         
         # Reshape untuk prediction
-        print("🔄 Reshaping features for model input...")
-        features = features.reshape(1, features.shape[0], features.shape[1])
-        print(f"✅ Features reshaped to: {features.shape}")
-        
-        # Predict
-        print("🧠 Running model prediction...")
         try:
+            print("🔄 Reshaping features for model input...")
+            features = features.reshape(1, features.shape[0], features.shape[1])
+            print(f"✅ Features reshaped to: {features.shape}")
+        except Exception as reshape_error:
+            raise Exception(f"Feature reshaping failed: {reshape_error}")
+        
+        # Predict with error handling
+        try:
+            print("🧠 Running model prediction...")
             prediction = loaded_model.predict(features, verbose=0)
             print(f"✅ Prediction completed: {prediction.shape}")
-        except Exception as e:
-            print(f"❌ Model prediction failed: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
+        except Exception as model_error:
+            raise Exception(f"Model prediction failed: {model_error}")
         
         # Get prediction results
         try:
             predicted_class = np.argmax(prediction, axis=1)[0]
             confidence = np.max(prediction)
             print(f"✅ Predicted class: {predicted_class}, confidence: {confidence:.4f}")
-        except Exception as e:
-            print(f"❌ Prediction result processing failed: {e}")
-            return None
+        except Exception as result_error:
+            raise Exception(f"Prediction result processing failed: {result_error}")
         
         # Get top 3 predictions
         try:
             top3_indices = np.argsort(prediction[0])[-3:][::-1]
             top3_probs = prediction[0][top3_indices]
             print(f"✅ Top 3 predictions: {top3_indices} with probs: {top3_probs}")
-        except Exception as e:
-            print(f"❌ Top 3 predictions failed: {e}")
-            return None
+        except Exception as top3_error:
+            raise Exception(f"Top 3 predictions failed: {top3_error}")
         
         # Convert to verse numbers
         try:
             verse_number = loaded_encoder.inverse_transform([predicted_class])[0]
             top3_verses = loaded_encoder.inverse_transform(top3_indices)
             print(f"✅ Verse conversion: {verse_number}, top3: {top3_verses}")
-        except Exception as e:
-            print(f"❌ Verse number conversion failed: {e}")
-            return None
+        except Exception as conversion_error:
+            raise Exception(f"Verse number conversion failed: {conversion_error}")
         
+        # Build result
         result = {
             'verse_number': int(verse_number),
             'confidence': float(confidence),
@@ -400,17 +560,26 @@ def predict_verse(audio_file_path):
                     'probability': float(p)
                 }
                 for v, p in zip(top3_verses, top3_probs)
-            ]
+            ],
+            'prediction_id': prediction_count,
+            'status': 'success'
         }
         
         print(f"✅ Prediction successful: Verse {verse_number} with {confidence:.2%} confidence")
         return result
         
     except Exception as e:
-        print(f"❌ Critical prediction error: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
+        error_msg = f"Prediction error: {str(e)}"
+        log_app_error(error_msg, "PREDICTION_MAIN")
+        
+        # Return error result instead of None
+        return {
+            'error': str(e),
+            'verse_number': None,
+            'confidence': 0.0,
+            'prediction_id': prediction_count,
+            'status': 'failed'
+        }
 
 # Routes
 @app.route('/')
@@ -547,7 +716,7 @@ def dataset_info():
     dataset_stats = {
         'total_folders': 0,
         'total_files': 0,
-        'total_verses': 41,  # 0-40 (Bismillah + 40 verses)
+        'total_verses': 41,  # 0-40 (Bismillah + Verses 1-40)
         'total_size': 'Calculating...',
         'folders': [],
         'sample_files': []
@@ -740,40 +909,272 @@ def verse_detail(verse_id):
 
 @app.route('/api/predict', methods=['POST'])
 def api_predict():
-    """API endpoint untuk prediksi"""
-    if 'audio_file' not in request.files:
-        return jsonify({'error': 'No file provided'}), 400
+    """API endpoint untuk prediksi - AMAN DARI CRASH"""
+    temp_filepath = None
     
-    file = request.files['audio_file']
-    if file.filename == '':
-        return jsonify({'error': 'No file selected'}), 400
-    
-    if file and file.filename.lower().endswith(('.mp3', '.wav', '.m4a')):
-        # Save temporary file
-        filename = secure_filename(file.filename)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        temp_filename = f"temp_{timestamp}_{filename}"
-        temp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], temp_filename)
-        file.save(temp_filepath)
+    try:
+        print("🌐 API Prediction request received")
         
+        # Validate request
+        if 'audio_file' not in request.files:
+            log_app_error("No audio file in request", "API_REQUEST")
+            return jsonify({
+                'error': 'No file provided',
+                'status': 'failed',
+                'prediction_id': prediction_count + 1
+            }), 400
+        
+        file = request.files['audio_file']
+        if file.filename == '':
+            log_app_error("Empty filename in request", "API_REQUEST")
+            return jsonify({
+                'error': 'No file selected',
+                'status': 'failed',
+                'prediction_id': prediction_count + 1
+            }), 400
+        
+        # Validate file format
+        allowed_extensions = ('.mp3', '.wav', '.m4a', '.flac')
+        if not file.filename.lower().endswith(allowed_extensions):
+            log_app_error(f"Invalid file format: {file.filename}", "API_REQUEST")
+            return jsonify({
+                'error': 'Invalid file format. Supported: MP3, WAV, M4A, FLAC',
+                'status': 'failed',
+                'prediction_id': prediction_count + 1
+            }), 400
+        
+        # Save temporary file with error handling
         try:
-            # Predict
+            filename = secure_filename(file.filename)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            temp_filename = f"temp_{timestamp}_{filename}"
+            temp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], temp_filename)
+            
+            # Ensure upload directory exists
+            os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+            
+            file.save(temp_filepath)
+            print(f"📁 Temporary file saved: {temp_filepath}")
+            
+            # Validate saved file
+            if not os.path.exists(temp_filepath):
+                raise Exception("File save verification failed")
+            
+            # Check file size
+            file_size = os.path.getsize(temp_filepath)
+            if file_size == 0:
+                raise Exception("Saved file is empty")
+            
+            print(f"✅ File validation passed: {file_size} bytes")
+            
+        except Exception as save_error:
+            log_app_error(f"File save error: {save_error}", "API_FILE_SAVE")
+            return jsonify({
+                'error': f'Failed to save file: {str(save_error)}',
+                'status': 'failed',
+                'prediction_id': prediction_count + 1
+            }), 500
+        
+        # Predict with comprehensive error handling
+        try:
+            print("🚀 Starting prediction process...")
             result = predict_verse(temp_filepath)
             
-            if result:
-                # Get verse info
-                verse_info = db_manager.get_verse_info(78, result['verse_number'])
-                result['verse_info'] = verse_info
-                return jsonify(result)
-            else:
-                return jsonify({'error': 'Failed to process audio'}), 500
+            if result is None:
+                raise Exception("Prediction returned None")
+            
+            # Check if result contains error
+            if isinstance(result, dict) and 'error' in result:
+                print(f"⚠️ Prediction error: {result['error']}")
+                return jsonify({
+                    'error': result['error'],
+                    'details': result.get('details', 'No details available'),
+                    'status': 'failed',
+                    'prediction_id': result.get('prediction_id', prediction_count)
+                }), 500
+            
+            # Success case - add verse info
+            try:
+                if result.get('verse_number') is not None:
+                    verse_info = db_manager.get_verse_info(78, result['verse_number'])
+                    result['verse_info'] = verse_info
+                
+                result['status'] = 'success'
+                print(f"✅ API prediction successful: Verse {result.get('verse_number')}")
+                
+                return jsonify(result), 200
+                
+            except Exception as db_error:
+                log_app_error(f"Database error: {db_error}", "API_DATABASE")
+                # Still return prediction without verse info
+                result['verse_info'] = None
+                result['db_warning'] = str(db_error)
+                return jsonify(result), 200
+            
+        except Exception as prediction_error:
+            log_app_error(f"API prediction error: {prediction_error}", "API_PREDICTION")
+            return jsonify({
+                'error': 'Prediction processing failed',
+                'details': str(prediction_error),
+                'status': 'failed',
+                'prediction_id': prediction_count
+            }), 500
         
-        finally:
-            # Clean up temp file
-            if os.path.exists(temp_filepath):
+    except Exception as general_error:
+        log_app_error(f"API general error: {general_error}", "API_GENERAL")
+        
+        # Emergency recovery
+        emergency_recovery()
+        
+        return jsonify({
+            'error': 'Internal server error',
+            'details': str(general_error),
+            'status': 'failed',
+            'recovery_attempted': True
+        }), 500
+        
+    finally:
+        # ALWAYS clean up temp file
+        try:
+            if temp_filepath and os.path.exists(temp_filepath):
                 os.remove(temp_filepath)
-    else:
-        return jsonify({'error': 'Invalid file format'}), 400
+                print(f"🗑️ Cleaned up file: {temp_filepath}")
+        except Exception as cleanup_error:
+            log_app_error(f"File cleanup error: {cleanup_error}", "API_CLEANUP")
+        
+        # Memory cleanup
+        try:
+            safe_memory_cleanup()
+        except Exception as memory_error:
+            log_app_error(f"Memory cleanup error: {memory_error}", "API_MEMORY")
+
+# Add Flask error handlers to prevent app crashes
+@app.errorhandler(404)
+def not_found_error(error):
+    """Handle 404 errors"""
+    log_app_error(f"404 error: {request.url}", "HTTP_404")
+    return render_template('error.html', 
+                         error_code=404, 
+                         error_message="Page not found"), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    """Handle 500 errors"""
+    log_app_error(f"500 error: {error}", "HTTP_500")
+    return render_template('error.html', 
+                         error_code=500, 
+                         error_message="Internal server error"), 500
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """Handle all uncaught exceptions to prevent Flask from crashing"""
+    log_app_error(f"Uncaught exception: {e}", "UNCAUGHT_EXCEPTION")
+    
+    # Emergency recovery
+    emergency_recovery()
+    
+    # Return JSON if it's an API request
+    if request.path.startswith('/api/'):
+        return jsonify({
+            'error': 'Server encountered an unexpected error',
+            'details': str(e),
+            'recovery_attempted': True
+        }), 500
+    
+    # Return HTML for regular requests
+    return render_template('error.html', 
+                         error_code=500, 
+                         error_message="Unexpected error occurred"), 500
+
+@app.route('/admin/errors')
+def view_errors():
+    """Admin endpoint to view recent errors"""
+    try:
+        return render_template('admin_errors.html', 
+                             errors=app_errors[-20:],  # Last 20 errors
+                             total_predictions=prediction_count)
+    except Exception as e:
+        return jsonify({
+            'recent_errors': app_errors[-10:] if app_errors else [],
+            'error_count': len(app_errors),
+            'prediction_count': prediction_count,
+            'view_error': str(e)
+        })
+
+@app.route('/admin/memory')
+def view_memory():
+    """Admin endpoint to check memory status"""
+    try:
+        process = psutil.Process()
+        memory_info = process.memory_info()
+        
+        return jsonify({
+            'memory_mb': memory_info.rss / 1024 / 1024,
+            'cpu_percent': process.cpu_percent(),
+            'prediction_count': prediction_count,
+            'error_count': len(app_errors),
+            'last_cleanup': last_cleanup_time,
+            'model_loaded': loaded_model is not None,
+            'encoder_loaded': loaded_encoder is not None
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+@app.route('/admin/cleanup')
+def manual_cleanup():
+    """Manual cleanup endpoint"""
+    try:
+        safe_memory_cleanup()
+        return jsonify({
+            'message': 'Manual cleanup completed',
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            'error': f'Cleanup failed: {e}',
+            'timestamp': datetime.now().isoformat()
+        })
+
+@app.route('/admin/emergency')
+def emergency_endpoint():
+    """Emergency recovery endpoint"""
+    try:
+        result = emergency_recovery()
+        return jsonify({
+            'message': 'Emergency recovery completed',
+            'success': result,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            'error': f'Emergency recovery failed: {e}',
+            'timestamp': datetime.now().isoformat()
+        })
+
+# Add Flask configuration for stability
+app.config['PROPAGATE_EXCEPTIONS'] = False  # Prevent exceptions from killing the app
+app.config['TRAP_HTTP_EXCEPTIONS'] = True   # Catch HTTP exceptions
+app.config['TRAP_BAD_REQUEST_ERRORS'] = True # Catch bad request errors
+
+# Add periodic cleanup
+def periodic_cleanup():
+    """Background thread for periodic cleanup"""
+    while True:
+        try:
+            time.sleep(60)  # Every 60 seconds
+            safe_memory_cleanup()
+            
+            # Clean old errors
+            global app_errors
+            if len(app_errors) > 100:
+                app_errors = app_errors[-50:]
+            
+        except Exception as e:
+            print(f"Periodic cleanup error: {e}")
+
+# Start background cleanup thread
+cleanup_thread = threading.Thread(target=periodic_cleanup, daemon=True)
+cleanup_thread.start()
 
 if __name__ == '__main__':
     print("🚀 Initializing Quran Verse Detection Web Application")
