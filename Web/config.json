@@ -32,5 +32,23 @@
     "n_mfcc": 13,
     "n_fft": 2048,
     "hop_length": 512
+  },
+  "public_tunnel": {
+    "enabled": false,
+    "type": "auto",
+    "ngrok_token": null,
+    "auto_open_browser": true,
+    "tunnel_options": {
+      "ngrok": {
+        "region": "us",
+        "bind_tls": true
+      },
+      "localtunnel": {
+        "subdomain": null
+      },
+      "cloudflare": {
+        "no_autoupdate": true
+      }
+    }
   }
 }

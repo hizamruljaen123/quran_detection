@@ -1,8 +1,8 @@
-Flask==3.0.0
-numpy==1.24.3
-librosa==0.10.1
-tensorflow==2.15.0
-scikit-learn==1.3.0
-mysql-connector-python==8.2.0
-scipy==1.11.1
-Werkzeug==3.0.1
+# Public tunnel dependencies
+pyngrok==7.0.0
+requests==2.31.0
+
+
+# Optional tunnel alternatives (install manually if needed)
+# localtunnel  # Install via npm: npm install -g localtunnel
+# cloudflared  # Download binary from https://github.com/cloudflare/cloudflared/releases

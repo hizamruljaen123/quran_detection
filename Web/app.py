@@ -25,6 +25,30 @@ from datetime import datetime
 import shutil
 from werkzeug.utils import secure_filename
 
+# Libraries for public access
+import subprocess
+import socket
+import requests
+import tempfile
+import webbrowser
+
+# Try to import ngrok libraries (optional)
+try:
+    from pyngrok import ngrok, conf
+    NGROK_AVAILABLE = True
+    print("✅ pyngrok library available")
+except ImportError:
+    NGROK_AVAILABLE = False
+    print("⚠️ pyngrok not available - install with: pip install pyngrok")
+
+try:
+    import localtunnel
+    LOCALTUNNEL_AVAILABLE = True
+    print("✅ localtunnel library available")
+except ImportError:
+    LOCALTUNNEL_AVAILABLE = False
+    print("⚠️ localtunnel not available - install with: pip install localtunnel")
+
 app = Flask(__name__)
 
 # Load configuration from file if exists
@@ -53,11 +77,248 @@ except (FileNotFoundError, KeyError, json.JSONDecodeError):
         'port': 3306
     }
 
-# Global variables for model
+# Global variables for model and tunneling
 loaded_model = None
 loaded_encoder = None
 model_metadata = None
 training_status = {"status": "idle", "progress": 0, "message": ""}
+
+# Public access variables
+public_url = None
+tunnel_process = None
+tunnel_type = None
+
+# Error tracking
+app_errors = []
+prediction_count = 0
+last_cleanup_time = time.time()
+
+class TunnelManager:
+    """Manager untuk membuat tunnel publik"""
+    
+    def __init__(self):
+        self.ngrok_tunnel = None
+        self.localtunnel_process = None
+        self.current_tunnel = None
+        self.tunnel_type = None
+    
+    def create_ngrok_tunnel(self, port, auth_token=None):
+        """Buat tunnel menggunakan Ngrok"""
+        if not NGROK_AVAILABLE:
+            return None, "pyngrok library not available"
+        
+        try:
+            # Set auth token if provided
+            if auth_token:
+                conf.get_default().auth_token = auth_token
+            
+            # Kill existing tunnels
+            ngrok.kill()
+            
+            # Create tunnel
+            public_tunnel = ngrok.connect(port, "http")
+            public_url = public_tunnel.public_url
+            
+            self.ngrok_tunnel = public_tunnel
+            self.current_tunnel = public_url
+            self.tunnel_type = "ngrok"
+            
+            print(f"🌍 Ngrok tunnel created: {public_url}")
+            return public_url, None
+            
+        except Exception as e:
+            error_msg = f"Failed to create Ngrok tunnel: {str(e)}"
+            print(f"❌ {error_msg}")
+            return None, error_msg
+    
+    def create_localtunnel(self, port):
+        """Buat tunnel menggunakan LocalTunnel"""
+        try:
+            # Check if localtunnel command is available
+            result = subprocess.run(['npx', 'localtunnel', '--version'], 
+                                  capture_output=True, text=True, timeout=10)
+            
+            if result.returncode != 0:
+                return None, "LocalTunnel not available - install with: npm install -g localtunnel"
+            
+            # Start localtunnel
+            cmd = ['npx', 'localtunnel', '--port', str(port)]
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, 
+                                     stderr=subprocess.PIPE, text=True)
+            
+            # Wait for URL
+            for _ in range(10):  # Wait up to 10 seconds
+                if process.poll() is not None:
+                    break
+                time.sleep(1)
+                
+                # Try to read output
+                try:
+                    output = process.stdout.readline()
+                    if 'https://' in output:
+                        url = output.strip().split()[-1]
+                        self.localtunnel_process = process
+                        self.current_tunnel = url
+                        self.tunnel_type = "localtunnel"
+                        print(f"🌍 LocalTunnel created: {url}")
+                        return url, None
+                except:
+                    continue
+            
+            # If we get here, tunnel creation failed
+            process.terminate()
+            return None, "Failed to get LocalTunnel URL"
+            
+        except Exception as e:
+            error_msg = f"Failed to create LocalTunnel: {str(e)}"
+            print(f"❌ {error_msg}")
+            return None, error_msg
+    
+    def create_serveo_tunnel(self, port):
+        """Buat tunnel menggunakan Serveo (SSH tunnel)"""
+        try:
+            # Generate random subdomain
+            import random
+            import string
+            subdomain = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+            
+            # Create SSH tunnel command
+            cmd = [
+                'ssh', '-R', f'{subdomain}:80:localhost:{port}', 
+                'serveo.net', '-o', 'StrictHostKeyChecking=no'
+            ]
+            
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, 
+                                     stderr=subprocess.PIPE, text=True)
+            
+            # Wait for URL
+            for _ in range(15):  # Wait up to 15 seconds
+                if process.poll() is not None:
+                    break
+                time.sleep(1)
+                
+                # Check for URL in output
+                try:
+                    output = process.stderr.readline()
+                    if 'Forwarding HTTP traffic from' in output:
+                        url = f"https://{subdomain}.serveo.net"
+                        self.localtunnel_process = process
+                        self.current_tunnel = url
+                        self.tunnel_type = "serveo"
+                        print(f"🌍 Serveo tunnel created: {url}")
+                        return url, None
+                except:
+                    continue
+            
+            # If we get here, tunnel creation failed
+            process.terminate()
+            return None, "Failed to create Serveo tunnel"
+            
+        except Exception as e:
+            error_msg = f"Failed to create Serveo tunnel: {str(e)}"
+            print(f"❌ {error_msg}")
+            return None, error_msg
+    
+    def create_cloudflared_tunnel(self, port):
+        """Buat tunnel menggunakan Cloudflare Tunnel"""
+        try:
+            # Check if cloudflared is available
+            result = subprocess.run(['cloudflared', '--version'], 
+                                  capture_output=True, text=True, timeout=10)
+            
+            if result.returncode != 0:
+                return None, "Cloudflare Tunnel not available - install cloudflared"
+            
+            # Start cloudflared tunnel
+            cmd = ['cloudflared', 'tunnel', '--url', f'http://localhost:{port}']
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, 
+                                     stderr=subprocess.PIPE, text=True)
+            
+            # Wait for URL
+            for _ in range(20):  # Wait up to 20 seconds
+                if process.poll() is not None:
+                    break
+                time.sleep(1)
+                
+                # Try to read output
+                try:
+                    output = process.stderr.readline()
+                    if 'https://' in output and 'trycloudflare.com' in output:
+                        # Extract URL from output
+                        import re
+                        url_match = re.search(r'https://[^\s]+\.trycloudflare\.com', output)
+                        if url_match:
+                            url = url_match.group()
+                            self.localtunnel_process = process
+                            self.current_tunnel = url
+                            self.tunnel_type = "cloudflare"
+                            print(f"🌍 Cloudflare tunnel created: {url}")
+                            return url, None
+                except:
+                    continue
+            
+            # If we get here, tunnel creation failed
+            process.terminate()
+            return None, "Failed to get Cloudflare tunnel URL"
+            
+        except Exception as e:
+            error_msg = f"Failed to create Cloudflare tunnel: {str(e)}"
+            print(f"❌ {error_msg}")
+            return None, error_msg
+    
+    def auto_create_tunnel(self, port, ngrok_token=None):
+        """Otomatis buat tunnel dengan mencoba berbagai opsi"""
+        print("🚀 Attempting to create public tunnel...")
+        
+        # Try Ngrok first (most reliable)
+        if NGROK_AVAILABLE:
+            print("🔧 Trying Ngrok...")
+            url, error = self.create_ngrok_tunnel(port, ngrok_token)
+            if url:
+                return url, "ngrok"
+        
+        # Try Cloudflare tunnel
+        print("🔧 Trying Cloudflare tunnel...")
+        url, error = self.create_cloudflared_tunnel(port)
+        if url:
+            return url, "cloudflare"
+        
+        # Try LocalTunnel
+        print("🔧 Trying LocalTunnel...")
+        url, error = self.create_localtunnel(port)
+        if url:
+            return url, "localtunnel"
+        
+        # Try Serveo
+        print("🔧 Trying Serveo...")
+        url, error = self.create_serveo_tunnel(port)
+        if url:
+            return url, "serveo"
+        
+        print("❌ All tunnel options failed")
+        return None, "failed"
+    
+    def close_tunnel(self):
+        """Tutup tunnel yang aktif"""
+        try:
+            if self.tunnel_type == "ngrok" and self.ngrok_tunnel:
+                ngrok.disconnect(self.ngrok_tunnel.public_url)
+                ngrok.kill()
+                print("🛑 Ngrok tunnel closed")
+            
+            if self.localtunnel_process:
+                self.localtunnel_process.terminate()
+                self.localtunnel_process.wait(timeout=5)
+                print(f"🛑 {self.tunnel_type} tunnel closed")
+            
+            self.current_tunnel = None
+            self.tunnel_type = None
+            
+        except Exception as e:
+            print(f"⚠️ Error closing tunnel: {e}")
+
+# Initialize tunnel manager
+tunnel_manager = TunnelManager()
 
 # Error tracking
 app_errors = []
@@ -586,7 +847,118 @@ def predict_verse(audio_file_path):
 def index():
     """Homepage"""
     model_status = "Loaded" if loaded_model else "Not Loaded"
-    return render_template('index.html', model_status=model_status)
+    tunnel_info = {
+        'url': tunnel_manager.current_tunnel,
+        'type': tunnel_manager.tunnel_type,
+        'active': tunnel_manager.current_tunnel is not None
+    }
+    return render_template('index.html', 
+                         model_status=model_status,
+                         tunnel_info=tunnel_info)
+
+@app.route('/tunnel')
+def tunnel_page():
+    """Halaman untuk mengelola tunnel publik"""
+    tunnel_info = {
+        'url': tunnel_manager.current_tunnel,
+        'type': tunnel_manager.tunnel_type,
+        'active': tunnel_manager.current_tunnel is not None,
+        'ngrok_available': NGROK_AVAILABLE,
+        'localtunnel_available': LOCALTUNNEL_AVAILABLE
+    }
+    return render_template('tunnel.html', tunnel_info=tunnel_info)
+
+@app.route('/api/create_tunnel', methods=['POST'])
+def create_tunnel():
+    """API untuk membuat tunnel publik"""
+    try:
+        data = request.get_json() or {}
+        tunnel_type = data.get('type', 'auto')
+        ngrok_token = data.get('ngrok_token', None)
+        port = data.get('port', 5000)
+        
+        # Close existing tunnel first
+        tunnel_manager.close_tunnel()
+        
+        if tunnel_type == 'auto':
+            url, created_type = tunnel_manager.auto_create_tunnel(port, ngrok_token)
+        elif tunnel_type == 'ngrok':
+            url, error = tunnel_manager.create_ngrok_tunnel(port, ngrok_token)
+            created_type = 'ngrok' if url else None
+        elif tunnel_type == 'localtunnel':
+            url, error = tunnel_manager.create_localtunnel(port)
+            created_type = 'localtunnel' if url else None
+        elif tunnel_type == 'cloudflare':
+            url, error = tunnel_manager.create_cloudflared_tunnel(port)
+            created_type = 'cloudflare' if url else None
+        elif tunnel_type == 'serveo':
+            url, error = tunnel_manager.create_serveo_tunnel(port)
+            created_type = 'serveo' if url else None
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid tunnel type'
+            }), 400
+        
+        if url:
+            return jsonify({
+                'success': True,
+                'url': url,
+                'type': created_type,
+                'message': f'{created_type.title()} tunnel created successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to create {tunnel_type} tunnel'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/close_tunnel', methods=['POST'])
+def close_tunnel():
+    """API untuk menutup tunnel aktif"""
+    try:
+        tunnel_manager.close_tunnel()
+        return jsonify({
+            'success': True,
+            'message': 'Tunnel closed successfully'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/tunnel_status')
+def tunnel_status():
+    """API untuk mendapatkan status tunnel"""
+    try:
+        # Test if tunnel is still active
+        tunnel_active = False
+        if tunnel_manager.current_tunnel:
+            try:
+                response = requests.get(tunnel_manager.current_tunnel, timeout=5)
+                tunnel_active = response.status_code == 200
+            except:
+                tunnel_active = False
+        
+        return jsonify({
+            'url': tunnel_manager.current_tunnel,
+            'type': tunnel_manager.tunnel_type,
+            'active': tunnel_active,
+            'ngrok_available': NGROK_AVAILABLE,
+            'localtunnel_available': LOCALTUNNEL_AVAILABLE
+        })
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'active': False
+        }), 500
 
 @app.route('/upload', methods=['GET', 'POST'])
 def upload_audio():
@@ -1176,6 +1548,63 @@ def periodic_cleanup():
 cleanup_thread = threading.Thread(target=periodic_cleanup, daemon=True)
 cleanup_thread.start()
 
+def start_server_with_tunnel(host='127.0.0.1', port=5000, debug=True, 
+                           create_public_tunnel=False, tunnel_type='auto', ngrok_token=None):
+    """Start server dengan opsi untuk membuat tunnel publik"""
+    
+    # Start server in background thread
+    server_thread = threading.Thread(
+        target=lambda: app.run(debug=debug, host=host, port=port, use_reloader=False),
+        daemon=True
+    )
+    server_thread.start()
+    
+    # Wait for server to start
+    print("⏳ Waiting for server to start...")
+    for i in range(10):
+        try:
+            response = requests.get(f'http://{host}:{port}', timeout=2)
+            if response.status_code == 200:
+                print("✅ Server is running!")
+                break
+        except:
+            time.sleep(1)
+    else:
+        print("❌ Server failed to start properly")
+        return None
+    
+    # Create public tunnel if requested
+    public_url = None
+    if create_public_tunnel:
+        print("\n🌍 Creating public tunnel...")
+        if tunnel_type == 'auto':
+            public_url, tunnel_type_used = tunnel_manager.auto_create_tunnel(port, ngrok_token)
+        else:
+            if tunnel_type == 'ngrok':
+                public_url, error = tunnel_manager.create_ngrok_tunnel(port, ngrok_token)
+            elif tunnel_type == 'localtunnel':
+                public_url, error = tunnel_manager.create_localtunnel(port)
+            elif tunnel_type == 'cloudflare':
+                public_url, error = tunnel_manager.create_cloudflared_tunnel(port)
+            elif tunnel_type == 'serveo':
+                public_url, error = tunnel_manager.create_serveo_tunnel(port)
+        
+        if public_url:
+            print(f"🌍 PUBLIC URL: {public_url}")
+            print(f"🔗 Your app is now accessible from anywhere!")
+            
+            # Try to open in browser
+            try:
+                webbrowser.open(public_url)
+                print("🌐 Opening in default browser...")
+            except:
+                print("⚠️ Could not open browser automatically")
+        else:
+            print("❌ Failed to create public tunnel")
+            print("🔧 You can try creating one manually from the /tunnel page")
+    
+    return public_url
+
 if __name__ == '__main__':
     print("🚀 Initializing Quran Verse Detection Web Application")
     print("=" * 60)
@@ -1219,27 +1648,97 @@ if __name__ == '__main__':
         host = config['app']['host']
         port = config['app']['port']
         debug = config['app']['debug']
+        
+        # Check for public tunnel configuration
+        public_tunnel_config = config.get('public_tunnel', {})
+        create_public = public_tunnel_config.get('enabled', False)
+        tunnel_type = public_tunnel_config.get('type', 'auto')
+        ngrok_token = public_tunnel_config.get('ngrok_token', None)
+        
         print(f"⚙️ Configuration loaded from config.json")
     except (FileNotFoundError, KeyError, json.JSONDecodeError):
         # Fallback to default
-        host = '127.0.0.1'  # Changed from 0.0.0.0 to localhost for stability
+        host = '127.0.0.1'
         port = 5000
         debug = True
+        create_public = False
+        tunnel_type = 'auto'
+        ngrok_token = None
         print(f"⚙️ Using default configuration")
     
+    # Check command line arguments for public tunnel
+    if len(sys.argv) > 1:
+        if '--public' in sys.argv:
+            create_public = True
+            print("🌍 Public tunnel requested via command line")
+        
+        if '--tunnel-type' in sys.argv:
+            try:
+                tunnel_idx = sys.argv.index('--tunnel-type')
+                tunnel_type = sys.argv[tunnel_idx + 1]
+                print(f"🔧 Tunnel type set to: {tunnel_type}")
+            except (IndexError, ValueError):
+                print("⚠️ Invalid --tunnel-type argument, using auto")
+        
+        if '--ngrok-token' in sys.argv:
+            try:
+                token_idx = sys.argv.index('--ngrok-token')
+                ngrok_token = sys.argv[token_idx + 1]
+                print("🔑 Ngrok token provided")
+            except (IndexError, ValueError):
+                print("⚠️ Invalid --ngrok-token argument")
+    
     print("\n🌐 Server Configuration:")
-    print(f"📡 Server: http://{host}:{port}")
+    print(f"📡 Local Server: http://{host}:{port}")
     print(f"🛠️  Debug mode: {'ON' if debug else 'OFF'}")
     print(f"📁 Upload folder: {app.config['UPLOAD_FOLDER']}")
     print(f"💾 Max file size: {app.config['MAX_CONTENT_LENGTH'] // (1024*1024)}MB")
     print(f"🤖 Model status: {'READY' if model_loaded else 'NOT LOADED'}")
+    print(f"🌍 Public tunnel: {'ENABLED' if create_public else 'DISABLED'}")
+    if create_public:
+        print(f"🔧 Tunnel type: {tunnel_type}")
+        print(f"🔑 Ngrok token: {'PROVIDED' if ngrok_token else 'NOT PROVIDED'}")
     print("=" * 60)
     print("🕌 Starting server... Press Ctrl+C to stop")
     print("=" * 60)
     
+    # Show available tunnel options
+    print("\n🔧 Available tunnel options:")
+    print(f"   📡 Ngrok: {'✅' if NGROK_AVAILABLE else '❌ (pip install pyngrok)'}")
+    print(f"   📡 LocalTunnel: {'✅' if LOCALTUNNEL_AVAILABLE else '❌ (npm install -g localtunnel)'}")
+    print(f"   📡 Cloudflare: ⚠️ (requires cloudflared binary)")
+    print(f"   📡 Serveo: ⚠️ (requires SSH)")
+    print("\n💡 To enable public access:")
+    print("   python app.py --public")
+    print("   python app.py --public --tunnel-type ngrok")
+    print("   python app.py --public --tunnel-type ngrok --ngrok-token YOUR_TOKEN")
+    print("=" * 60)
+    
     # Run app with error handling
     try:
-        app.run(debug=debug, host=host, port=port, use_reloader=False)
+        if create_public:
+            public_url = start_server_with_tunnel(
+                host=host, port=port, debug=debug,
+                create_public_tunnel=True, tunnel_type=tunnel_type, 
+                ngrok_token=ngrok_token
+            )
+            
+            if public_url:
+                print(f"\n🎉 SUCCESS! Your app is publicly accessible at:")
+                print(f"🌍 {public_url}")
+                print(f"🔗 Share this link with anyone to access your app!")
+                print("\n📱 You can also manage tunnels from: {}/tunnel".format(public_url))
+            
+            # Keep main thread alive
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                print("\n🛑 Shutting down...")
+                tunnel_manager.close_tunnel()
+        else:
+            app.run(debug=debug, host=host, port=port, use_reloader=False)
+            
     except Exception as e:
         print(f"❌ Server failed to start: {e}")
         exit(1)

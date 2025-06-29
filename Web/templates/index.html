@@ -91,6 +91,29 @@
     </style>
 </head>
 <body>
+    <!-- System Status Banner -->
+    {% if tunnel_info and tunnel_info.active %}
+    <div class="alert alert-success alert-dismissible fade show m-0 rounded-0 border-0" role="alert">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <i class="fas fa-globe me-2"></i>
+                    <strong>Akses Publik Aktif!</strong> 
+                    Aplikasi dapat diakses dari mana saja melalui: 
+                    <a href="{{ tunnel_info.url }}" target="_blank" class="text-decoration-none fw-bold">{{ tunnel_info.url }}</a>
+                    <span class="badge bg-primary ms-2">{{ tunnel_info.type|title }}</span>
+                </div>
+                <div class="col-md-4 text-end">
+                    <button type="button" class="btn btn-sm btn-outline-success me-2" onclick="copyPublicUrl()">
+                        <i class="fas fa-copy me-1"></i>Salin URL
+                    </button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert"></button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Navigation -->
     <nav class="navbar navbar-expand-lg navbar-dark fixed-top" style="background: rgba(102, 126, 234, 0.95); backdrop-filter: blur(10px);">
         <div class="container">
@@ -131,6 +154,14 @@
                     <li class="nav-item">
                         <a class="nav-link fw-semibold" href="{{ url_for('verses_list') }}">
                             <i class="fas fa-book-open me-1"></i>Ayat Al-Quran
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link fw-semibold" href="{{ url_for('tunnel_page') }}">
+                            <i class="fas fa-globe me-1"></i>Akses Publik
+                            {% if tunnel_info and tunnel_info.active %}
+                                <span class="badge bg-success ms-1">Aktif</span>
+                            {% endif %}
                         </a>
                     </li>
                 </ul>
@@ -478,6 +509,32 @@
         if (statsSection) {
             observer.observe(statsSection);
         }
+
+        // Function to copy public URL
+        function copyPublicUrl() {
+            const url = "{{ tunnel_info.url if tunnel_info and tunnel_info.active else '' }}";
+            if (url) {
+                navigator.clipboard.writeText(url).then(() => {
+                    // Show temporary success message
+                    const btn = event.target.closest('button');
+                    const originalText = btn.innerHTML;
+                    btn.innerHTML = '<i class="fas fa-check me-1"></i>Tersalin!';
+                    btn.classList.remove('btn-outline-success');
+                    btn.classList.add('btn-success');
+                    
+                    setTimeout(() => {
+                        btn.innerHTML = originalText;
+                        btn.classList.remove('btn-success');
+                        btn.classList.add('btn-outline-success');
+                    }, 2000);
+                }).catch(() => {
+                    alert('Gagal menyalin URL. Silakan salin manual: ' + url);
+                });
+            }
+        }
+
+        // Make function globally available
+        window.copyPublicUrl = copyPublicUrl;
     </script>
 </body>
 </html>
