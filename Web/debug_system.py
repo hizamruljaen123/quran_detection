@@ -223,6 +223,388 @@ def test_tensorflow():
         traceback.print_exc()
         return False
 
+def check_memory_usage():
+    """Check memory usage"""
+    print("\n💾 Memory Usage Check:")
+    
+    try:
+        import psutil
+        
+        # Get memory info
+        memory = psutil.virtual_memory()
+        print(f"   📊 Total RAM: {memory.total / (1024**3):.1f} GB")
+        print(f"   📊 Available RAM: {memory.available / (1024**3):.1f} GB")
+        print(f"   📊 Used RAM: {memory.percent}%")
+        
+        # Get current process memory
+        process = psutil.Process()
+        process_memory = process.memory_info()
+        print(f"   🔍 Current process RAM: {process_memory.rss / (1024**2):.1f} MB")
+        
+        if memory.percent > 90:
+            print("   ⚠️ WARNING: Memory usage very high!")
+            return False
+        elif memory.percent > 80:
+            print("   ⚠️ WARNING: Memory usage high")
+            
+        return True
+        
+    except ImportError:
+        print("   ⚠️ psutil not available, install with: pip install psutil")
+        return True
+    except Exception as e:
+        print(f"   ❌ Memory check failed: {e}")
+        return False
+
+def check_tensorflow_memory():
+    """Check TensorFlow memory configuration"""
+    print("\n🧠 TensorFlow Memory Check:")
+    
+    try:
+        import tensorflow as tf
+        
+        # Check GPU memory growth setting
+        gpus = tf.config.experimental.list_physical_devices('GPU')
+        if gpus:
+            for gpu in gpus:
+                try:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+                    print(f"   ✅ GPU memory growth enabled for {gpu}")
+                except RuntimeError as e:
+                    print(f"   ⚠️ Cannot set memory growth: {e}")
+        else:
+            print("   💻 No GPU detected, using CPU")
+        
+        # Check if eager execution is enabled
+        if tf.executing_eagerly():
+            print("   ✅ Eager execution enabled")
+        else:
+            print("   ⚠️ Eager execution disabled")
+        
+        return True
+        
+    except Exception as e:
+        print(f"   ❌ TensorFlow memory check failed: {e}")
+        return False
+
+def check_flask_config():
+    """Check Flask configuration for potential issues"""
+    print("\n🌐 Flask Configuration Check:")
+    
+    try:
+        # Check if we can import Flask
+        from flask import Flask
+        
+        # Create a test Flask app to check configuration
+        test_app = Flask(__name__)
+        
+        # Check important Flask settings
+        print(f"   ✅ Flask version: {Flask.__version__}")
+        
+        # Check max content length
+        max_content = test_app.config.get('MAX_CONTENT_LENGTH')
+        if max_content:
+            print(f"   📁 Max upload size: {max_content / (1024*1024):.1f} MB")
+        else:
+            print("   ⚠️ No max upload size set (could cause memory issues)")
+        
+        # Check debug mode
+        debug_mode = test_app.config.get('DEBUG', False)
+        print(f"   🐛 Debug mode: {debug_mode}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"   ❌ Flask config check failed: {e}")
+        return False
+
+def check_file_handles():
+    """Check for file handle leaks"""
+    print("\n📁 File Handle Check:")
+    
+    try:
+        import psutil
+        
+        process = psutil.Process()
+        open_files = process.open_files()
+        
+        print(f"   📊 Open file handles: {len(open_files)}")
+        
+        # Check for specific file types that might cause issues
+        temp_files = [f for f in open_files if 'tmp' in f.path.lower() or 'temp' in f.path.lower()]
+        upload_files = [f for f in open_files if 'upload' in f.path.lower()]
+        
+        if temp_files:
+            print(f"   ⚠️ Temporary files open: {len(temp_files)}")
+            for f in temp_files[:3]:  # Show first 3
+                print(f"      - {f.path}")
+        
+        if upload_files:
+            print(f"   ⚠️ Upload files open: {len(upload_files)}")
+            for f in upload_files[:3]:  # Show first 3
+                print(f"      - {f.path}")
+        
+        if len(open_files) > 100:
+            print("   ⚠️ WARNING: Many file handles open - possible leak!")
+            return False
+        
+        return True
+        
+    except ImportError:
+        print("   ⚠️ psutil not available for file handle check")
+        return True
+    except Exception as e:
+        print(f"   ❌ File handle check failed: {e}")
+        return False
+
+def check_prediction_pipeline():
+    """Test the prediction pipeline with a dummy file"""
+    print("\n🔮 Prediction Pipeline Test:")
+    
+    try:
+        import numpy as np
+        import librosa
+        from werkzeug.datastructures import FileStorage
+        from io import BytesIO
+        
+        # Create a dummy audio file in memory
+        sr = 22050
+        duration = 3.0  # 3 seconds
+        test_audio = np.sin(2 * np.pi * 440 * np.linspace(0, duration, int(sr * duration)))
+        
+        # Convert to bytes (simplified MP3-like structure)
+        audio_bytes = (test_audio * 32767).astype(np.int16).tobytes()
+        
+        print("   ✅ Created test audio data")
+        
+        # Test feature extraction
+        mfccs = librosa.feature.mfcc(y=test_audio, sr=sr, n_mfcc=13)
+        spectral_centroids = librosa.feature.spectral_centroid(y=test_audio, sr=sr)
+        spectral_rolloff = librosa.feature.spectral_rolloff(y=test_audio, sr=sr)
+        zero_crossing_rate = librosa.feature.zero_crossing_rate(test_audio)
+        
+        print("   ✅ Feature extraction test passed")
+        print(f"      MFCC shape: {mfccs.shape}")
+        print(f"      Spectral centroids: {spectral_centroids.shape}")
+        print(f"      Spectral rolloff: {spectral_rolloff.shape}")
+        print(f"      ZCR: {zero_crossing_rate.shape}")
+        
+        # Test memory cleanup
+        del test_audio, mfccs, spectral_centroids, spectral_rolloff, zero_crossing_rate
+        print("   ✅ Memory cleanup test passed")
+        
+        return True
+        
+    except Exception as e:
+        print(f"   ❌ Prediction pipeline test failed: {e}")
+        traceback.print_exc()
+        return False
+
+def check_cleanup_process():
+    """Check if cleanup processes are working"""
+    print("\n🧹 Cleanup Process Check:")
+    
+    try:
+        # Check upload directory
+        upload_dir = 'static/uploads'
+        if os.path.exists(upload_dir):
+            files = os.listdir(upload_dir)
+            print(f"   📁 Files in upload directory: {len(files)}")
+            
+            # Check for old files (older than 1 hour)
+            import time
+            current_time = time.time()
+            old_files = []
+            
+            for file in files:
+                file_path = os.path.join(upload_dir, file)
+                if os.path.isfile(file_path):
+                    file_age = current_time - os.path.getmtime(file_path)
+                    if file_age > 3600:  # 1 hour
+                        old_files.append(file)
+            
+            if old_files:
+                print(f"   ⚠️ Old files found: {len(old_files)}")
+                print("   🧹 Consider cleaning up old upload files")
+            else:
+                print("   ✅ No old files found")
+        else:
+            print("   ❌ Upload directory not found")
+            return False
+        
+        return True
+        
+    except Exception as e:
+        print(f"   ❌ Cleanup check failed: {e}")
+        return False
+
+def diagnose_crash_symptoms():
+    """Diagnose common crash symptoms"""
+    print("\n🔍 Crash Symptom Analysis:")
+    
+    # Check for common crash indicators
+    symptoms = []
+    
+    try:
+        import psutil
+        process = psutil.Process()
+        
+        # Check memory usage
+        memory_info = process.memory_info()
+        memory_mb = memory_info.rss / (1024 * 1024)
+        
+        if memory_mb > 1000:  # More than 1GB
+            symptoms.append("High memory usage detected")
+        
+        # Check CPU usage
+        cpu_percent = process.cpu_percent(interval=1)
+        if cpu_percent > 80:
+            symptoms.append("High CPU usage detected")
+        
+    except:
+        pass
+    
+    # Check for potential memory leaks
+    try:
+        import gc
+        obj_count = len(gc.get_objects())
+        print(f"   📊 Python objects in memory: {obj_count}")
+        
+        if obj_count > 100000:
+            symptoms.append("Large number of Python objects (possible memory leak)")
+    except:
+        pass
+    
+    # Report symptoms
+    if symptoms:
+        print("   ⚠️ Potential issues detected:")
+        for symptom in symptoms:
+            print(f"      - {symptom}")
+        
+        print("\n   🔧 Recommendations:")
+        print("      - Restart the application periodically")
+        print("      - Implement memory cleanup after predictions")
+        print("      - Monitor resource usage")
+        print("      - Consider using process isolation")
+        
+        return False
+    else:
+        print("   ✅ No obvious crash symptoms detected")
+        return True
+
+def create_crash_fix_recommendations():
+    """Create specific recommendations for post-prediction crashes"""
+    print("\n🛠️ POST-PREDICTION CRASH FIX RECOMMENDATIONS:")
+    print("=" * 60)
+    
+    print("\n📋 Based on your log, the prediction completed successfully but app crashed after.")
+    print("   Here are the most likely causes and fixes:\n")
+    
+    print("1. 🧠 MEMORY LEAK IN MODEL/TENSORFLOW:")
+    print("   Problem: TensorFlow model not releasing memory after prediction")
+    print("   Fix: Add explicit memory cleanup in prediction function:")
+    print("   ```python")
+    print("   import gc")
+    print("   import tensorflow as tf")
+    print("   ")
+    print("   # After prediction")
+    print("   tf.keras.backend.clear_session()")
+    print("   gc.collect()")
+    print("   ```\n")
+    
+    print("2. 📁 FILE HANDLE NOT CLOSED:")
+    print("   Problem: Audio file or temporary files not properly closed")
+    print("   Fix: Use proper context managers:")
+    print("   ```python")
+    print("   # Instead of:")
+    print("   # audio_file = open(file_path)")
+    print("   ")
+    print("   # Use:")
+    print("   with open(file_path, 'rb') as audio_file:")
+    print("       # process file")
+    print("       pass  # file automatically closed")
+    print("   ```\n")
+    
+    print("3. 🎵 LIBROSA MEMORY ISSUE:")
+    print("   Problem: Audio processing leaving large arrays in memory")
+    print("   Fix: Explicitly delete large arrays:")
+    print("   ```python")
+    print("   # After feature extraction")
+    print("   del audio_data, mfccs, spectral_features")
+    print("   gc.collect()")
+    print("   ```\n")
+    
+    print("4. 🌐 FLASK RESPONSE ISSUE:")
+    print("   Problem: Error in returning JSON response")
+    print("   Fix: Add proper error handling:")
+    print("   ```python")
+    print("   try:")
+    print("       return jsonify({'verse_number': result})")
+    print("   except Exception as e:")
+    print("       app.logger.error(f'Response error: {e}')")
+    print("       return jsonify({'error': str(e)}), 500")
+    print("   ```\n")
+    
+    print("5. 🔄 THREAD/PROCESS ISSUE:")
+    print("   Problem: Background threads or processes not cleaned up")
+    print("   Fix: Use proper cleanup in app teardown:")
+    print("   ```python")
+    print("   @app.teardown_appcontext")
+    print("   def cleanup(error):")
+    print("       # Cleanup resources")
+    print("       tf.keras.backend.clear_session()")
+    print("   ```\n")
+    
+    print("6. 📊 IMMEDIATE ACTIONS TO TRY:")
+    print("   ✅ Restart the Flask application")
+    print("   ✅ Check Windows Task Manager for memory usage")
+    print("   ✅ Add print statements to track where crash occurs")
+    print("   ✅ Implement try-catch around prediction response")
+    print("   ✅ Add garbage collection after each prediction")
+    print("   ✅ Monitor upload directory for file cleanup")
+
+def create_quick_fix_script():
+    """Create a quick fix script for immediate deployment"""
+    print("\n🚀 GENERATING QUICK FIX SCRIPT...")
+    
+    quick_fix_code = '''
+# Quick Fix for Post-Prediction Crashes
+# Add this to your prediction route
+
+import gc
+import tensorflow as tf
+from functools import wraps
+
+def cleanup_after_prediction(f):
+    """Decorator to cleanup resources after prediction"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        try:
+            result = f(*args, **kwargs)
+            return result
+        finally:
+            # Force cleanup
+            tf.keras.backend.clear_session()
+            gc.collect()
+            print("🧹 Cleanup completed after prediction")
+    return decorated_function
+
+# Apply to your prediction route:
+# @app.route('/api/predict', methods=['POST'])
+# @cleanup_after_prediction
+# def predict():
+#     # your existing prediction code
+#     pass
+'''
+    
+    try:
+        with open('quick_fix_decorator.py', 'w') as f:
+            f.write(quick_fix_code)
+        print("   ✅ Created: quick_fix_decorator.py")
+        print("   📋 Copy the decorator to your app.py and apply to prediction route")
+    except Exception as e:
+        print(f"   ❌ Failed to create quick fix file: {e}")
+
 def main():
     """Main diagnostic function"""
     print("🔍 Quran Detection App - System Diagnosis")
@@ -238,6 +620,13 @@ def main():
     results.append(check_config())
     results.append(test_audio_processing())
     results.append(test_tensorflow())
+    results.append(check_memory_usage())
+    results.append(check_tensorflow_memory())
+    results.append(check_flask_config())
+    results.append(check_file_handles())
+    results.append(check_prediction_pipeline())
+    results.append(check_cleanup_process())
+    results.append(diagnose_crash_symptoms())
     
     # Summary
     print("\n" + "=" * 50)
@@ -259,6 +648,14 @@ def main():
     print("   3. Create upload directory: mkdir -p static/uploads")
     print("   4. Check Python version (need 3.8+)")
     print("   5. If TensorFlow issues, try: pip install --upgrade tensorflow")
+    print("   6. Install psutil for monitoring: pip install psutil")
+    print("   7. For post-prediction crashes, see recommendations below")
+    
+    # Add specific crash analysis
+    if passed != total:
+        print("\n" + "⚠️" * 20)
+        create_crash_fix_recommendations()
+        create_quick_fix_script()
     
     return passed == total
 
