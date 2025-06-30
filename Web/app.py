@@ -1079,7 +1079,16 @@ def upload_audio():
             flash(f'Upload failed: {str(general_error)}', 'error')
             return redirect(request.url)
     
-    return render_template('upload.html')
+    # GET request: tampilkan halaman upload dengan contoh tajweed_html
+    # Contoh: ambil satu ayat dari database untuk preview tajweed
+    try:
+        sura_id = 78
+        verse_id = 23  # Contoh ayat
+        verse_info = db_manager.get_verse_info(sura_id, verse_id)
+        tajweed_html = verse_info['ayahText'] if verse_info and 'ayahText' in verse_info else ''
+    except Exception as e:
+        tajweed_html = ''
+    return render_template('upload.html', tajweed_html=tajweed_html)
 
 @app.route('/dataset')
 def dataset_info():

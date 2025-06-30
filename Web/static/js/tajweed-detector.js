@@ -258,7 +258,7 @@ class TajweedDetector {
         // Urutkan dari belakang ke depan untuk menghindari pergeseran indeks
         allMatches.sort((a, b) => b.index - a.index);
         
-        // Terapkan span dengan style untuk setiap kecocokan
+        // Terapkan span dengan underline style untuk setiap kecocokan
         allMatches.forEach(match => {
             const rule = this.rules[match.rule];
             const lang = this.options.tooltipLanguage;
@@ -268,10 +268,12 @@ class TajweedDetector {
             const after = processedText.substring(match.index + match.length);
             
             let replacement;
+            // Only underline, do not color text
+            const underlineStyle = `text-decoration: underline; text-decoration-color: ${rule.color}; text-decoration-thickness: 3px;`;
             if (this.options.showTooltips) {
-                replacement = `<span class="tajweed-${match.rule}" style="color: ${rule.color};" title="${description}">${match.text}</span>`;
+                replacement = `<span class="tajweed-${match.rule}" style="${underlineStyle}" title="${description}">${match.text}</span>`;
             } else {
-                replacement = `<span class="tajweed-${match.rule}" style="color: ${rule.color};">${match.text}</span>`;
+                replacement = `<span class="tajweed-${match.rule}" style="${underlineStyle}">${match.text}</span>`;
             }
             
             processedText = before + replacement + after;
