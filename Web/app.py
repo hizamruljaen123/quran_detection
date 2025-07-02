@@ -1407,6 +1407,11 @@ def run_training_process():
             "message": f"Training failed: {str(e)}"
         }
 
+@app.route('/train', methods=['POST'])
+def train_alias():
+    """Alias endpoint untuk memulai training (POST /train)"""
+    return start_training()
+
 @app.route('/verses')
 def verses_list():
     """List semua ayat dalam surat"""
