@@ -487,225 +487,49 @@ class DatabaseManager:
             return None
     
     def get_verse_info(self, sura_id, verse_id):
-        """Ambil informasi ayat dari database"""
+        """Ambil informasi ayat dari tabel quran_id dan pastikan output dict dengan key yang benar"""
         connection = self.get_connection()
         if not connection:
-            return None
-        
+            return {
+                'ayahText': '',
+                'indoText': '',
+                'readText': '',
+                'verse_id': verse_id,
+                'sura_id': sura_id
+            }
         try:
             cursor = connection.cursor(dictionary=True)
-            # FIX: use 'verse_id' not 'verseID'
-            cursor.execute("SELECT * FROM verses WHERE sura_id=%s AND verse_id=%s", (sura_id, verse_id))
+            # Query sesuai struktur tabel quran_id
+            cursor.execute("SELECT * FROM quran_id WHERE suraId=%s AND verseID=%s", (sura_id, verse_id))
             result = cursor.fetchone()
             cursor.close()
             connection.close()
-            return result
-        except Error as e:
-            print(f"Database query error: {e}")
-            return None
-    def get_sura_info(self, sura_id):
-        """Ambil informasi surat"""
-        # Untuk Surah An-Naba (78)
-        sura_names = {
-            78: {"name": "An-Naba", "name_id": "Berita Besar", "total_verses": 40}
-        }
-        return sura_names.get(sura_id, {"name": "Unknown", "name_id": "Tidak Diketahui", "total_verses": 0})
-
-# Initialize database manager
-db_manager = DatabaseManager(DB_CONFIG)
-
-def extract_advanced_features(file_path, max_length=256, sr=22050):
-    """
-    Extract advanced audio features untuk deteksi ayat
-    """
-    try:
-        print(f"🎵 Starting feature extraction for: {file_path}")
-        
-        # Check if file exists
-        if not os.path.exists(file_path):
-            print(f"❌ File not found: {file_path}")
-            return None
-        
-        # Load dan preprocess audio
-        print("📥 Loading audio file...")
-        audio, sample_rate = librosa.load(file_path, sr=sr)
-        print(f"✅ Audio loaded: {len(audio)} samples at {sample_rate} Hz")
-        
-        # Basic preprocessing
-        print("🔧 Preprocessing audio...")
-        audio = librosa.util.normalize(audio)
-        audio, _ = librosa.effects.trim(audio, top_db=20)
-        
-        # Apply pre-emphasis filter safely
-        try:
-            audio = scipy.signal.lfilter([1, -0.95], [1], audio)
-        except Exception as e:
-            print(f"⚠️ Pre-emphasis filter failed, skipping: {e}")
-        
-        print(f"✅ Audio preprocessed: {len(audio)} samples")
-        
-        # Extract multiple features
-        features_list = []
-        
-        # MFCC features
-        print("🎯 Extracting MFCC features...")
-        try:
-            mfccs = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=20, n_fft=2048, hop_length=512)
-            mfcc_delta = librosa.feature.delta(mfccs)
-            mfcc_delta2 = librosa.feature.delta(mfccs, order=2)
-            features_list.extend([mfccs, mfcc_delta, mfcc_delta2])
-            print(f"✅ MFCC features extracted: {mfccs.shape}")
-        except Exception as e:
-            print(f"❌ MFCC extraction failed: {e}")
-            return None
-        
-        # Spectral features
-        print("🌈 Extracting spectral features...")
-        try:
-            spectral_centroids = librosa.feature.spectral_centroid(y=audio, sr=sr)
-            spectral_rolloff = librosa.feature.spectral_rolloff(y=audio, sr=sr, roll_percent=0.85)
-            spectral_bandwidth = librosa.feature.spectral_bandwidth(y=audio, sr=sr)
-            spectral_contrast = librosa.feature.spectral_contrast(y=audio, sr=sr, n_bands=6)
-            features_list.extend([spectral_centroids, spectral_rolloff, spectral_bandwidth, spectral_contrast])
-            print(f"✅ Spectral features extracted")
-        except Exception as e:
-            print(f"❌ Spectral features extraction failed: {e}")
-            return None
-        
-        # Additional features
-        print("🎼 Extracting additional features...")
-        try:
-            zero_crossing_rate = librosa.feature.zero_crossing_rate(audio)
-            chroma = librosa.feature.chroma_stft(y=audio, sr=sr)
-            tonnetz = librosa.feature.tonnetz(y=audio, sr=sr)
-            features_list.extend([zero_crossing_rate, chroma, tonnetz])
-            print(f"✅ Additional features extracted")
-        except Exception as e:
-            print(f"❌ Additional features extraction failed: {e}")
-            return None
-        
-        # Combine features
-        print("🔗 Combining features...")
-        try:
-            combined_features = np.vstack(features_list)
-            print(f"✅ Features combined: {combined_features.shape}")
-        except Exception as e:
-            print(f"❌ Feature combination failed: {e}")
-            return None
-        
-        # Normalize
-        print("📏 Normalizing features...")
-        try:
-            scaler = RobustScaler()
-            combined_features = scaler.fit_transform(combined_features.T).T
-            print(f"✅ Features normalized")
-        except Exception as e:
-            print(f"❌ Feature normalization failed: {e}")
-            return None
-        
-        # Pad or truncate
-        print("✂️ Adjusting feature length...")
-        try:
-            if combined_features.shape[1] < max_length:
-                pad_width = max_length - combined_features.shape[1]
-                combined_features = np.pad(combined_features, ((0, 0), (0, pad_width)), mode='constant')
+            # Map ke key yang diharapkan template
+            if result:
+                return {
+                    'ayahText': result.get('ayahText', ''),
+                    'indoText': result.get('indoText', ''),
+                    'readText': result.get('readText', ''),
+                    'verse_id': result.get('verseID', verse_id),
+                    'sura_id': result.get('suraId', sura_id)
+                }
             else:
-                combined_features = combined_features[:, :max_length]
-            
-            print(f"✅ Final features shape: {combined_features.T.shape}")
-            return combined_features.T
-        except Exception as e:
-            print(f"❌ Feature length adjustment failed: {e}")
-            return None
-        
-    except Exception as e:
-        print(f"❌ Critical error in feature extraction: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
-
-# --- FIX 1: Model loading, remove batch_shape, add error message if not loaded ---
-def load_model_if_exists():
-    global loaded_model, loaded_encoder, model_metadata
-    print("\U0001F916 Attempting to load AI model...")
-    import os
-    import pickle
-    from tensorflow import keras
-    model_dirs = [
-        '../model_saves_quran_model_final',
-        'models', 
-        '../model_saves_basic_improved', 
-        '../model_saves_improved_simple'
-    ]
-    for model_dir in model_dirs:
-        print(f"\U0001F4C1 Checking directory: {model_dir}")
-        if not os.path.exists(model_dir):
-            continue
-        try:
-            model_path = os.path.join(model_dir, 'quran_model.h5')
-            encoder_path = os.path.join(model_dir, 'label_encoder.pkl')
-            metadata_path = os.path.join(model_dir, 'metadata.json')
-            if os.path.exists(model_path):
-                print(f"\U0001F4E5 Loading model from: {model_path}")
-                try:
-                    loaded_model = keras.models.load_model(model_path)
-                except TypeError as e:
-                    print(f"❌ Failed to load model: {e}")
-                    loaded_model = None
-                    continue
-                except Exception as e:
-                    print(f"❌ Failed to load model: {e}")
-                    loaded_model = None
-                    continue
-                if os.path.exists(encoder_path):
-                    with open(encoder_path, 'rb') as f:
-                        loaded_encoder = pickle.load(f)
-                if os.path.exists(metadata_path):
-                    import json
-                    with open(metadata_path, 'r', encoding='utf-8') as f:
-                        model_metadata = json.load(f)
-                print("✅ Model loaded successfully!")
-                return True
-        except Exception as e:
-            print(f"❌ Failed to load model: {e}")
-            continue
-    print("❌ No valid model found in any directory")
-    loaded_model = None
-    return False
-
-# --- FIX 2: DatabaseManager, use 'verse_id' instead of 'verseID' ---
-class DatabaseManager:
-    """Manager untuk koneksi database MySQL"""
-    
-    def __init__(self, config):
-        self.config = config
-    
-    def get_connection(self):
-        """Buat koneksi database"""
-        try:
-            connection = mysql.connector.connect(**self.config)
-            return connection
-        except Error as e:
-            print(f"Database connection error: {e}")
-            return None
-    
-    def get_verse_info(self, sura_id, verse_id):
-        """Ambil informasi ayat dari database"""
-        connection = self.get_connection()
-        if not connection:
-            return None
-        
-        try:
-            cursor = connection.cursor(dictionary=True)
-            # FIX: use 'verse_id' not 'verseID'
-            cursor.execute("SELECT * FROM verses WHERE sura_id=%s AND verse_id=%s", (sura_id, verse_id))
-            result = cursor.fetchone()
-            cursor.close()
-            connection.close()
-            return result
+                return {
+                    'ayahText': '',
+                    'indoText': '',
+                    'readText': '',
+                    'verse_id': verse_id,
+                    'sura_id': sura_id
+                }
         except Error as e:
             print(f"Database query error: {e}")
-            return None
+            return {
+                'ayahText': '',
+                'indoText': '',
+                'readText': '',
+                'verse_id': verse_id,
+                'sura_id': sura_id
+            }
     def get_sura_info(self, sura_id):
         """Ambil informasi surat"""
         # Untuk Surah An-Naba (78)
