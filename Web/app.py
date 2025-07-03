@@ -490,6 +490,7 @@ class DatabaseManager:
         """Ambil informasi ayat dari tabel quran_id dan pastikan output dict dengan key yang benar"""
         connection = self.get_connection()
         if not connection:
+            print(f"[DB] Koneksi gagal untuk suraId={sura_id}, verseID={verse_id}")
             return {
                 'ayahText': '',
                 'indoText': '',
@@ -499,13 +500,16 @@ class DatabaseManager:
             }
         try:
             cursor = connection.cursor(dictionary=True)
-            # Query sesuai struktur tabel quran_id
+            print(f"[DB] Query: SELECT * FROM quran_id WHERE suraId={sura_id} AND verseID={verse_id}")
             cursor.execute("SELECT * FROM quran_id WHERE suraId=%s AND verseID=%s", (sura_id, verse_id))
             result = cursor.fetchone()
+            print(f"[DB] Query result: {result}")
             cursor.close()
             connection.close()
             # Map ke key yang diharapkan template
             if result:
+                # Print all keys for debug
+                print(f"[DB] Result keys: {list(result.keys())}")
                 return {
                     'ayahText': result.get('ayahText', ''),
                     'indoText': result.get('indoText', ''),
@@ -514,6 +518,7 @@ class DatabaseManager:
                     'sura_id': result.get('suraId', sura_id)
                 }
             else:
+                print(f"[DB] Tidak ditemukan data untuk suraId={sura_id}, verseID={verse_id}")
                 return {
                     'ayahText': '',
                     'indoText': '',
