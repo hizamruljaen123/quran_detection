@@ -1260,6 +1260,8 @@ def verse_detail(verse_id):
     """Detail ayat tertentu"""
     verse_info = db_manager.get_verse_info(78, verse_id)
     sura_info = db_manager.get_sura_info(78)
+
+    print(f"🔍 Fetching details for verse {verse_id} in An-Naba")
     
     if not verse_info:
         flash('Verse not found', 'error')
